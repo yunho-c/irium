@@ -418,6 +418,7 @@ pub enum ClickTarget {
     ScopeTab(ScopeTab),
     NamingTab(NamingTab),
     ScopeFileRow(usize),
+    ScopeFileCheckbox(usize),
     ScopeFilesSettingsButton,
     ScopeFilesSettingShowSelectedCategoriesOnly,
     ScopeCategoryRow(usize),

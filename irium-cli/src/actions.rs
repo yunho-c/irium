@@ -260,6 +260,20 @@ fn handle_mouse_click(app: &mut AppState, col: u16, row: u16) {
             app.set_scope_tab(ScopeTab::Files);
             app.tree.cursor = index;
             app.normalize_scope_files_cursor();
+            if let Some(node_id) = app.current_scope_file_node_id()
+                && app.tree.nodes[node_id].is_dir
+            {
+                if app.tree.nodes[node_id].expanded {
+                    app.collapse_current();
+                } else {
+                    app.expand_current();
+                }
+            }
+        }
+        ClickTarget::ScopeFileCheckbox(index) => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.tree.cursor = index;
+            app.normalize_scope_files_cursor();
             app.toggle_scope_file_selection();
         }
         ClickTarget::ScopeFilesSettingsButton => {
@@ -343,6 +357,12 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
     match target {
         ClickTarget::StageTab(_) | ClickTarget::ScopeTab(_) | ClickTarget::NamingTab(_) => {}
         ClickTarget::ScopeFileRow(_) => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.normalize_scope_files_cursor();
+            app.tree.cursor = scroll_index(app.tree.cursor, app.scope_files_rows_len(), delta);
+            app.normalize_scope_files_cursor();
+        }
+        ClickTarget::ScopeFileCheckbox(_) => {
             app.set_scope_tab(ScopeTab::Files);
             app.normalize_scope_files_cursor();
             app.tree.cursor = scroll_index(app.tree.cursor, app.scope_files_rows_len(), delta);

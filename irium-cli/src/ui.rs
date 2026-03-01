@@ -327,6 +327,7 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         let node = &app.tree.nodes[row.node_id];
         let mut indent = "  ".repeat(row.depth as usize);
         let _ = indent.pop();
+        let indent_width = indent.chars().count() as u16;
         let icon = node_icon(node);
         let mark = if app.node_selected_for_display(row.node_id) {
             "[x]"
@@ -357,10 +358,37 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         items.push(ListItem::new(Line::from(line)).style(style));
 
         let y = list_area.y + (idx - app.tree.scroll) as u16;
-        app.click_regions.register(
-            Rect::new(list_area.x, y, list_area.width, 1),
-            ClickTarget::ScopeFileRow(idx),
-        );
+        let checkbox_start = indent_width.min(list_area.width);
+        let checkbox_width = if checkbox_start < list_area.width {
+            3u16.min(list_area.width - checkbox_start)
+        } else {
+            0
+        };
+
+        if checkbox_start > 0 {
+            app.click_regions.register(
+                Rect::new(list_area.x, y, checkbox_start, 1),
+                ClickTarget::ScopeFileRow(idx),
+            );
+        }
+        if checkbox_width > 0 {
+            app.click_regions.register(
+                Rect::new(list_area.x + checkbox_start, y, checkbox_width, 1),
+                ClickTarget::ScopeFileCheckbox(idx),
+            );
+        }
+        let after_checkbox = checkbox_start.saturating_add(checkbox_width);
+        if after_checkbox < list_area.width {
+            app.click_regions.register(
+                Rect::new(
+                    list_area.x + after_checkbox,
+                    y,
+                    list_area.width - after_checkbox,
+                    1,
+                ),
+                ClickTarget::ScopeFileRow(idx),
+            );
+        }
     }
 
     frame.render_widget(List::new(items), list_area);
