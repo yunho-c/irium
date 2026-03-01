@@ -277,8 +277,8 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
                 Span::raw(icon)
             },
             Span::raw(" "),
-            Span::raw(node.name.as_str()),
         ];
+        append_name_with_muted_extension(&mut line, node);
         if node.unreadable {
             line.push(Span::raw(" !"));
         }
@@ -298,6 +298,24 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     }
 
     frame.render_widget(List::new(items), area);
+}
+
+fn append_name_with_muted_extension(line: &mut Vec<Span<'_>>, node: &crate::model::FileNode) {
+    if node.is_dir {
+        line.push(Span::raw(node.name.clone()));
+        return;
+    }
+
+    if let Some(dot_pos) = node.name.rfind('.')
+        && dot_pos > 0
+    {
+        let (base, ext) = node.name.split_at(dot_pos);
+        line.push(Span::raw(base.to_string()));
+        line.push(Span::styled(ext.to_string(), Theme::muted_text()));
+        return;
+    }
+
+    line.push(Span::raw(node.name.clone()));
 }
 
 fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect, focused: bool) {
