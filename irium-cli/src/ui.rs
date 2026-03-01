@@ -350,7 +350,7 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             line.push(Span::raw(" !"));
         }
 
-        let style = if idx == app.tree.cursor {
+        let style = if idx == app.tree.cursor || app.scope_files_focus_nodes.contains(&row.node_id) {
             Theme::selected_row()
         } else {
             Theme::panel()
@@ -360,7 +360,7 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         let y = list_area.y + (idx - app.tree.scroll) as u16;
         let checkbox_start = indent_width.min(list_area.width);
         let checkbox_width = if checkbox_start < list_area.width {
-            3u16.min(list_area.width - checkbox_start)
+            4u16.min(list_area.width - checkbox_start)
         } else {
             0
         };

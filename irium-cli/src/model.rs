@@ -436,6 +436,23 @@ pub enum ClickTarget {
 }
 
 #[derive(Debug, Clone)]
+pub enum FilesDragMode {
+    CheckboxSelect {
+        target_selected: bool,
+        visited_rows: HashSet<usize>,
+    },
+    RowFocus {
+        visited_rows: HashSet<usize>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct FilesDragState {
+    pub mode: FilesDragMode,
+    pub start_index: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct AppState {
     pub cwd: PathBuf,
     pub stage: Stage,
@@ -497,4 +514,6 @@ pub struct AppState {
     pub selected_by_tree: HashSet<PathBuf>,
     pub filter_cache: HashMap<PathBuf, bool>,
     pub category_match_dirs: HashSet<PathBuf>,
+    pub scope_files_focus_nodes: HashSet<usize>,
+    pub scope_files_drag: Option<FilesDragState>,
 }

@@ -82,6 +82,8 @@ impl AppState {
             selected_by_tree: HashSet::new(),
             filter_cache: HashMap::new(),
             category_match_dirs: HashSet::new(),
+            scope_files_focus_nodes: HashSet::new(),
+            scope_files_drag: None,
         };
 
         app.sync_focus_manager();
@@ -257,7 +259,11 @@ impl AppState {
     }
 
     pub fn normalize_scope_files_cursor(&mut self) {
-        let len = self.scope_files_rows_len();
+        let rows = self.scope_files_rows();
+        let len = rows.len();
+        let visible_nodes: HashSet<usize> = rows.into_iter().map(|row| row.node_id).collect();
+        self.scope_files_focus_nodes
+            .retain(|node_id| visible_nodes.contains(node_id));
         if len == 0 {
             self.tree.cursor = 0;
             self.tree.scroll = 0;
@@ -576,6 +582,24 @@ impl AppState {
     }
 
     pub fn toggle_scope_file_selection(&mut self) {
+        if !self.scope_files_focus_nodes.is_empty() {
+            let focus_nodes: Vec<usize> = self.scope_files_focus_nodes.iter().copied().collect();
+            let all_selected = focus_nodes
+                .iter()
+                .all(|node_id| self.node_selected_for_display(*node_id));
+            for node_id in focus_nodes {
+                if let Err(error) = self.set_node_selected(node_id, !all_selected) {
+                    self.push_toast(
+                        ToastLevel::Error,
+                        format!("Selection update failed: {error}"),
+                    );
+                    break;
+                }
+            }
+            self.sync_rename_rows();
+            return;
+        }
+
         let Some(node_id) = self.current_scope_file_node_id() else {
             return;
         };
@@ -588,6 +612,35 @@ impl AppState {
             );
         }
         self.sync_rename_rows();
+    }
+
+    pub fn scope_file_node_id_at(&self, row_index: usize) -> Option<usize> {
+        let rows = self.scope_files_rows();
+        if row_index >= rows.len() {
+            return None;
+        }
+        Some(rows[row_index].node_id)
+    }
+
+    pub fn set_scope_file_selection_at(
+        &mut self,
+        row_index: usize,
+        selected: bool,
+    ) -> Result<(), String> {
+        let Some(node_id) = self.scope_file_node_id_at(row_index) else {
+            return Ok(());
+        };
+        self.set_node_selected(node_id, selected)
+    }
+
+    pub fn clear_scope_file_focus_nodes(&mut self) {
+        self.scope_files_focus_nodes.clear();
+    }
+
+    pub fn add_scope_file_focus_node_at(&mut self, row_index: usize) {
+        if let Some(node_id) = self.scope_file_node_id_at(row_index) {
+            self.scope_files_focus_nodes.insert(node_id);
+        }
     }
 
     pub fn select_all_visible_files(&mut self) {

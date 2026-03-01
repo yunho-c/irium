@@ -12,8 +12,12 @@ pub fn map_event(app: &AppState, event: Event) -> Vec<Action> {
         Event::Key(key) if key.kind == KeyEventKind::Press => map_key(app, key),
         Event::Mouse(mouse) => match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                vec![Action::MouseClick(mouse.column, mouse.row)]
+                vec![Action::MouseDown(mouse.column, mouse.row)]
             }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                vec![Action::MouseDrag(mouse.column, mouse.row)]
+            }
+            MouseEventKind::Up(MouseButton::Left) => vec![Action::MouseUp(mouse.column, mouse.row)],
             MouseEventKind::ScrollUp => vec![Action::MouseScrollUp(mouse.column, mouse.row)],
             MouseEventKind::ScrollDown => vec![Action::MouseScrollDown(mouse.column, mouse.row)],
             _ => Vec::new(),

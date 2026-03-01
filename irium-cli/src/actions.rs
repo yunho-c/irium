@@ -1,4 +1,9 @@
-use crate::model::{AppState, ClickTarget, FocusPane, InputMode, NamingTab, ScopeTab, Stage};
+use std::collections::HashSet;
+
+use crate::model::{
+    AppState, ClickTarget, FilesDragMode, FilesDragState, FocusPane, InputMode, NamingTab,
+    ScopeTab, Stage, ToastLevel,
+};
 
 #[derive(Debug, Clone)]
 pub enum Action {
@@ -37,7 +42,9 @@ pub enum Action {
     CommitInput,
     CancelInput,
     Autocomplete,
-    MouseClick(u16, u16),
+    MouseDown(u16, u16),
+    MouseDrag(u16, u16),
+    MouseUp(u16, u16),
     MouseScrollUp(u16, u16),
     MouseScrollDown(u16, u16),
 }
@@ -159,7 +166,9 @@ pub fn reduce(app: &mut AppState, action: Action) {
                 app.autocomplete_override();
             }
         }
-        Action::MouseClick(col, row) => handle_mouse_click(app, col, row),
+        Action::MouseDown(col, row) => handle_mouse_down(app, col, row),
+        Action::MouseDrag(col, row) => handle_mouse_drag(app, col, row),
+        Action::MouseUp(col, row) => handle_mouse_up(app, col, row),
         Action::MouseScrollUp(col, row) => handle_mouse_scroll(app, col, row, true),
         Action::MouseScrollDown(col, row) => handle_mouse_scroll(app, col, row, false),
     }
@@ -247,11 +256,122 @@ fn handle_commit(app: &mut AppState) {
     }
 }
 
-fn handle_mouse_click(app: &mut AppState, col: u16, row: u16) {
+fn handle_mouse_down(app: &mut AppState, col: u16, row: u16) {
     let Some(target) = app.click_regions.handle_click(col, row).cloned() else {
+        app.scope_files_drag = None;
+        app.clear_scope_file_focus_nodes();
         return;
     };
 
+    match target {
+        ClickTarget::ScopeFileCheckbox(index) => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.set_focus(FocusPane::ScopeFiles);
+            app.tree.cursor = index;
+            app.normalize_scope_files_cursor();
+            app.clear_scope_file_focus_nodes();
+            let target_selected = app
+                .scope_file_node_id_at(index)
+                .map(|node_id| !app.node_selected_for_display(node_id))
+                .unwrap_or(false);
+            if let Err(error) = app.set_scope_file_selection_at(index, target_selected) {
+                app.push_toast(
+                    ToastLevel::Error,
+                    format!("Selection update failed: {error}"),
+                );
+            }
+            app.scope_files_drag = Some(FilesDragState {
+                mode: FilesDragMode::CheckboxSelect {
+                    target_selected,
+                    visited_rows: HashSet::from([index]),
+                },
+                start_index: index,
+            });
+        }
+        ClickTarget::ScopeFileRow(index) => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.set_focus(FocusPane::ScopeFiles);
+            app.tree.cursor = index;
+            app.normalize_scope_files_cursor();
+            app.clear_scope_file_focus_nodes();
+            app.add_scope_file_focus_node_at(index);
+            app.scope_files_drag = Some(FilesDragState {
+                mode: FilesDragMode::RowFocus {
+                    visited_rows: HashSet::from([index]),
+                },
+                start_index: index,
+            });
+        }
+        _ => {
+            app.scope_files_drag = None;
+            app.clear_scope_file_focus_nodes();
+            handle_click_target(app, target);
+        }
+    }
+}
+
+fn handle_mouse_drag(app: &mut AppState, col: u16, row: u16) {
+    let Some(mut drag) = app.scope_files_drag.take() else {
+        return;
+    };
+
+    let target = app.click_regions.handle_click(col, row).cloned();
+    match (&mut drag.mode, target) {
+        (
+            FilesDragMode::CheckboxSelect {
+                target_selected,
+                visited_rows,
+            },
+            Some(ClickTarget::ScopeFileCheckbox(index)),
+        ) => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.set_focus(FocusPane::ScopeFiles);
+            app.tree.cursor = index;
+            app.normalize_scope_files_cursor();
+            if visited_rows.insert(index)
+                && let Err(error) = app.set_scope_file_selection_at(index, *target_selected)
+            {
+                app.push_toast(
+                    ToastLevel::Error,
+                    format!("Selection update failed: {error}"),
+                );
+            }
+        }
+        (FilesDragMode::RowFocus { visited_rows }, Some(ClickTarget::ScopeFileRow(index)))
+        | (FilesDragMode::RowFocus { visited_rows }, Some(ClickTarget::ScopeFileCheckbox(index))) => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.set_focus(FocusPane::ScopeFiles);
+            app.tree.cursor = index;
+            app.normalize_scope_files_cursor();
+            if visited_rows.insert(index) {
+                app.add_scope_file_focus_node_at(index);
+            }
+        }
+        _ => {}
+    }
+
+    app.scope_files_drag = Some(drag);
+}
+
+fn handle_mouse_up(app: &mut AppState, _col: u16, _row: u16) {
+    let Some(drag) = app.scope_files_drag.take() else {
+        return;
+    };
+
+    match drag.mode {
+        FilesDragMode::CheckboxSelect { .. } => {
+            app.sync_rename_rows();
+        }
+        FilesDragMode::RowFocus { visited_rows } => {
+            if visited_rows.len() <= 1 {
+                app.clear_scope_file_focus_nodes();
+                handle_click_target(app, ClickTarget::ScopeFileRow(drag.start_index));
+            }
+        }
+    }
+}
+
+fn handle_click_target(app: &mut AppState, target: ClickTarget) {
     match target {
         ClickTarget::StageTab(stage) => app.set_stage(stage),
         ClickTarget::ScopeTab(tab) => app.set_scope_tab(tab),
@@ -272,8 +392,10 @@ fn handle_mouse_click(app: &mut AppState, col: u16, row: u16) {
         }
         ClickTarget::ScopeFileCheckbox(index) => {
             app.set_scope_tab(ScopeTab::Files);
+            app.set_focus(FocusPane::ScopeFiles);
             app.tree.cursor = index;
             app.normalize_scope_files_cursor();
+            app.clear_scope_file_focus_nodes();
             app.toggle_scope_file_selection();
         }
         ClickTarget::ScopeFilesSettingsButton => {
