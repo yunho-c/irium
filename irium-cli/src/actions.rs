@@ -35,8 +35,8 @@ pub enum Action {
     CancelInput,
     Autocomplete,
     MouseClick(u16, u16),
-    MouseScrollUp,
-    MouseScrollDown,
+    MouseScrollUp(u16, u16),
+    MouseScrollDown(u16, u16),
 }
 
 pub fn reduce(app: &mut AppState, action: Action) {
@@ -133,8 +133,8 @@ pub fn reduce(app: &mut AppState, action: Action) {
             }
         }
         Action::MouseClick(col, row) => handle_mouse_click(app, col, row),
-        Action::MouseScrollUp => app.move_up(),
-        Action::MouseScrollDown => app.move_down(),
+        Action::MouseScrollUp(col, row) => handle_mouse_scroll(app, col, row, true),
+        Action::MouseScrollDown(col, row) => handle_mouse_scroll(app, col, row, false),
     }
 }
 
@@ -286,6 +286,120 @@ fn handle_mouse_click(app: &mut AppState, col: u16, row: u16) {
             app.set_focus(FocusPane::ApplyHistory);
             app.history_cursor = index;
         }
+    }
+}
+
+fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) {
+    let delta: isize = if scroll_up { -1 } else { 1 };
+    let maybe_target = app.click_regions.handle_click(col, row).cloned();
+
+    let Some(target) = maybe_target else {
+        if scroll_up {
+            app.move_up();
+        } else {
+            app.move_down();
+        }
+        return;
+    };
+
+    match target {
+        ClickTarget::StageTab(_) | ClickTarget::ScopeTab(_) | ClickTarget::NamingTab(_) => {}
+        ClickTarget::ScopeFileRow(_) => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.tree.fix_cursor();
+            app.tree.cursor = scroll_index(app.tree.cursor, app.tree.visible_nodes().len(), delta);
+            app.tree.fix_cursor();
+        }
+        ClickTarget::ScopeCategoryRow(_) => {
+            app.set_scope_tab(ScopeTab::Select);
+            app.select_cursor = scroll_index(app.select_cursor, app.category_filters.len(), delta);
+        }
+        ClickTarget::ScopeConstraintRow(_) => {
+            app.set_scope_tab(ScopeTab::Constraint);
+            let max_len = crate::model::TimeConstraint::ALL.len() + crate::model::SizeConstraint::ALL.len();
+            app.constraint_cursor = scroll_index(app.constraint_cursor, max_len, delta);
+        }
+        ClickTarget::ScopePresetRow(_) => {
+            app.set_scope_tab(ScopeTab::Preset);
+            app.preset_cursor = scroll_index(app.preset_cursor, 9, delta);
+        }
+        ClickTarget::ScopeMarketplaceRow(_) => {
+            app.set_scope_tab(ScopeTab::Marketplace);
+            app.marketplace_cursor =
+                scroll_index(app.marketplace_cursor, app.marketplace_presets.len(), delta);
+        }
+        ClickTarget::NamingPane(focus) => {
+            app.set_focus(focus);
+            match focus {
+                FocusPane::NamingTable => {
+                    app.rename_cursor = scroll_index(app.rename_cursor, app.rename_rows.len(), delta);
+                }
+                FocusPane::NamingRight => {
+                    if app.naming_tab == NamingTab::Suggestions {
+                        app.suggestion_cursor =
+                            scroll_index(app.suggestion_cursor, app.suggestions.len(), delta);
+                    } else {
+                        app.style_cursor = scroll_index(app.style_cursor, 5, delta);
+                    }
+                }
+                FocusPane::NamingCommand => {}
+                _ => {}
+            }
+        }
+        ClickTarget::NamingRow(_) => {
+            app.set_focus(FocusPane::NamingTable);
+            app.rename_cursor = scroll_index(app.rename_cursor, app.rename_rows.len(), delta);
+        }
+        ClickTarget::NamingSuggestion(_) => {
+            app.set_focus(FocusPane::NamingRight);
+            app.naming_tab = NamingTab::Suggestions;
+            app.suggestion_cursor = scroll_index(app.suggestion_cursor, app.suggestions.len(), delta);
+        }
+        ClickTarget::NamingStyleRow(_) => {
+            app.set_focus(FocusPane::NamingRight);
+            app.naming_tab = NamingTab::Style;
+            app.style_cursor = scroll_index(app.style_cursor, 5, delta);
+        }
+        ClickTarget::ApplyPane(focus) => {
+            app.set_focus(focus);
+            match focus {
+                FocusPane::ApplyReview => {
+                    app.apply_cursor = scroll_index(
+                        app.apply_cursor,
+                        app.rename_rows.iter().filter(|row| row.selected).count(),
+                        delta,
+                    );
+                }
+                FocusPane::ApplyHistory => {
+                    app.history_cursor =
+                        scroll_index(app.history_cursor, app.undo_history.len(), delta);
+                }
+                _ => {}
+            }
+        }
+        ClickTarget::ApplyRow(_) => {
+            app.set_focus(FocusPane::ApplyReview);
+            app.apply_cursor = scroll_index(
+                app.apply_cursor,
+                app.rename_rows.iter().filter(|row| row.selected).count(),
+                delta,
+            );
+        }
+        ClickTarget::ApplyHistoryRow(_) => {
+            app.set_focus(FocusPane::ApplyHistory);
+            app.history_cursor = scroll_index(app.history_cursor, app.undo_history.len(), delta);
+        }
+    }
+}
+
+fn scroll_index(current: usize, len: usize, delta: isize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    if delta < 0 {
+        current.saturating_sub((-delta) as usize)
+    } else {
+        (current + delta as usize).min(len - 1)
     }
 }
 
