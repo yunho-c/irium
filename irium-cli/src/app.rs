@@ -587,21 +587,24 @@ impl AppState {
     }
 
     pub fn select_all_visible_files(&mut self) {
-        let mut all_file_nodes = Vec::new();
-        let mut had_unreadable = false;
-        self.collect_file_nodes_recursive(self.tree.root, &mut all_file_nodes, &mut had_unreadable);
+        let visible_file_nodes: Vec<usize> = self
+            .scope_files_rows()
+            .into_iter()
+            .map(|row| row.node_id)
+            .filter(|node_id| !self.tree.nodes[*node_id].is_dir)
+            .collect();
 
-        if all_file_nodes.is_empty() {
-            self.push_toast(ToastLevel::Warning, "No files to select");
+        if visible_file_nodes.is_empty() {
+            self.push_toast(ToastLevel::Warning, "No visible files to select");
             self.sync_rename_rows();
             return;
         }
 
-        let all_selected = all_file_nodes
+        let all_selected = visible_file_nodes
             .iter()
             .all(|node_id| self.tree.nodes[*node_id].selected);
 
-        for node_id in &all_file_nodes {
+        for node_id in &visible_file_nodes {
             self.tree.nodes[*node_id].selected = !all_selected;
             let path = self.tree.nodes[*node_id].path.clone();
             if all_selected {
@@ -611,47 +614,19 @@ impl AppState {
             }
         }
 
-        let affected = all_file_nodes.len();
+        let affected = visible_file_nodes.len();
         if all_selected {
             self.push_toast(
                 ToastLevel::Success,
-                format!("Deselected {affected} file(s)"),
+                format!("Deselected {affected} visible file(s)"),
             );
         } else {
             self.push_toast(
                 ToastLevel::Success,
-                format!("Selected {affected} file(s)"),
-            );
-        }
-        if had_unreadable {
-            self.push_toast(
-                ToastLevel::Warning,
-                "Some folders could not be read; selection may be partial",
+                format!("Selected {affected} visible file(s)"),
             );
         }
         self.sync_rename_rows();
-    }
-
-    fn collect_file_nodes_recursive(
-        &mut self,
-        node_id: usize,
-        out: &mut Vec<usize>,
-        had_unreadable: &mut bool,
-    ) {
-        if !self.tree.nodes[node_id].is_dir {
-            out.push(node_id);
-            return;
-        }
-
-        if let Err(_error) = self.ensure_children_loaded(node_id) {
-            *had_unreadable = true;
-            return;
-        }
-
-        let children = self.tree.nodes[node_id].children.clone();
-        for child in children {
-            self.collect_file_nodes_recursive(child, out, had_unreadable);
-        }
     }
 
     pub fn node_selected_for_display(&self, node_id: usize) -> bool {
@@ -1268,8 +1243,7 @@ mod tests {
         let mut app = AppState::new(cwd);
 
         let visible_file_nodes: Vec<usize> = app
-            .tree
-            .visible_nodes()
+            .scope_files_rows()
             .into_iter()
             .map(|row| row.node_id)
             .filter(|node_id| !app.tree.nodes[*node_id].is_dir)
@@ -1289,8 +1263,7 @@ mod tests {
         let mut app = AppState::new(cwd);
 
         let visible_file_nodes: Vec<usize> = app
-            .tree
-            .visible_nodes()
+            .scope_files_rows()
             .into_iter()
             .map(|row| row.node_id)
             .filter(|node_id| !app.tree.nodes[*node_id].is_dir)
@@ -1306,9 +1279,9 @@ mod tests {
     }
 
     #[test]
-    fn select_all_visible_files_includes_nested_files_inside_folders() {
+    fn select_all_visible_files_only_affects_currently_visible_rows() {
         let unique = format!(
-            "irium-select-all-nested-{}-{}",
+            "irium-select-all-visible-only-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -1327,7 +1300,36 @@ mod tests {
         app.select_all_visible_files();
 
         assert!(app.selected_by_tree.contains(&top_file));
-        assert!(app.selected_by_tree.contains(&nested_file));
+        assert!(!app.selected_by_tree.contains(&nested_file));
+
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn select_all_visible_files_respects_selected_categories_only_filter() {
+        let unique = format!(
+            "irium-select-all-filtered-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&root).expect("create root");
+        let pdf_file = root.join("doc.pdf");
+        let audio_file = root.join("song.mp3");
+        std::fs::write(&pdf_file, b"x").expect("write pdf file");
+        std::fs::write(&audio_file, b"y").expect("write audio file");
+
+        let mut app = AppState::new(root.clone());
+        app.selected_extensions.insert("pdf".to_string());
+        app.show_selected_categories_only = true;
+        app.normalize_scope_files_cursor();
+        app.select_all_visible_files();
+
+        assert!(app.selected_by_tree.contains(&pdf_file));
+        assert!(!app.selected_by_tree.contains(&audio_file));
 
         std::fs::remove_dir_all(root).expect("cleanup");
     }
