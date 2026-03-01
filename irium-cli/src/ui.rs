@@ -93,23 +93,7 @@ fn draw_stage_tabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 fn draw_subtabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     match app.stage {
         Stage::Scope => {
-            let titles: Vec<Line<'_>> = ScopeTab::ALL
-                .iter()
-                .map(|tab| Line::from(tab.title()))
-                .collect();
-            let selected = ScopeTab::ALL
-                .iter()
-                .position(|tab| *tab == app.scope_tab)
-                .unwrap_or(0);
-            frame.render_widget(
-                Tabs::new(titles)
-                    .style(Theme::muted_text())
-                    .highlight_style(Theme::accent_text())
-                    .select(selected)
-                    .divider("  "),
-                area,
-            );
-            app.ui_map.scope_tabs = segment_tabs(area, ScopeTab::ALL.as_slice());
+            app.ui_map.scope_tabs.clear();
         }
         Stage::Naming => {
             let titles: Vec<Line<'_>> = NamingTab::ALL
@@ -139,19 +123,116 @@ fn draw_subtabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn draw_scope(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let main_block = focus_block("Scope", app.focus == FocusPane::ScopeMain);
-    frame.render_widget(main_block, area);
+    app.ui_map.scope_main = area;
+    app.ui_map.scope_tabs.clear();
+    app.ui_map.file_rows.clear();
+    app.ui_map.select_rows.clear();
+    app.ui_map.constraint_rows.clear();
+    app.ui_map.preset_rows.clear();
+    app.ui_map.marketplace_rows.clear();
 
+    let split = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .split(area);
+
+    draw_scope_left(frame, app, split[0]);
+    draw_scope_right(frame, app, split[1]);
+}
+
+fn draw_scope_left(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
+    let focused = app.focus == FocusPane::ScopeMain
+        && matches!(app.scope_tab, ScopeTab::Files | ScopeTab::Select);
+    frame.render_widget(focus_block("Files / Select", focused), area);
     let inner = inner_rect(area);
-    match app.scope_tab {
-        ScopeTab::Files => draw_scope_files(frame, app, inner),
-        ScopeTab::Select => draw_scope_select(frame, app, inner),
-        ScopeTab::Constraint => draw_scope_constraint(frame, app, inner),
-        ScopeTab::Preset => draw_scope_preset(frame, app, inner),
-        ScopeTab::Marketplace => draw_scope_marketplace(frame, app, inner),
+    if inner.height < 3 {
+        return;
     }
 
-    app.ui_map.scope_main = area;
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+
+    let left_tabs = [ScopeTab::Files, ScopeTab::Select];
+    let selected = if app.scope_left_tab == ScopeTab::Select {
+        1
+    } else {
+        0
+    };
+    frame.render_widget(
+        Tabs::new(
+            left_tabs
+                .iter()
+                .map(|tab| Line::from(tab.title()))
+                .collect::<Vec<_>>(),
+        )
+        .style(Theme::muted_text())
+        .highlight_style(Theme::accent_text())
+        .select(selected)
+        .divider("  "),
+        layout[0],
+    );
+    app.ui_map
+        .scope_tabs
+        .extend(segment_tabs(layout[0], left_tabs.as_slice()));
+
+    match app.scope_left_tab {
+        ScopeTab::Files => draw_scope_files(frame, app, layout[1]),
+        ScopeTab::Select => draw_scope_select(frame, app, layout[1]),
+        ScopeTab::Constraint | ScopeTab::Preset | ScopeTab::Marketplace => {
+            draw_scope_files(frame, app, layout[1]);
+        }
+    }
+}
+
+fn draw_scope_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
+    let focused = app.focus == FocusPane::ScopeMain
+        && matches!(
+            app.scope_tab,
+            ScopeTab::Constraint | ScopeTab::Preset | ScopeTab::Marketplace
+        );
+    frame.render_widget(focus_block("Constraint / Preset", focused), area);
+    let inner = inner_rect(area);
+    if inner.height < 3 {
+        return;
+    }
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+
+    let right_tabs = [ScopeTab::Constraint, ScopeTab::Preset, ScopeTab::Marketplace];
+    let selected = match app.scope_right_tab {
+        ScopeTab::Constraint => 0,
+        ScopeTab::Preset => 1,
+        ScopeTab::Marketplace => 2,
+        ScopeTab::Files | ScopeTab::Select => 0,
+    };
+    frame.render_widget(
+        Tabs::new(
+            right_tabs
+                .iter()
+                .map(|tab| Line::from(tab.title()))
+                .collect::<Vec<_>>(),
+        )
+        .style(Theme::muted_text())
+        .highlight_style(Theme::accent_text())
+        .select(selected)
+        .divider("  "),
+        layout[0],
+    );
+    app.ui_map
+        .scope_tabs
+        .extend(segment_tabs(layout[0], right_tabs.as_slice()));
+
+    match app.scope_right_tab {
+        ScopeTab::Constraint => draw_scope_constraint(frame, app, layout[1]),
+        ScopeTab::Preset => draw_scope_preset(frame, app, layout[1]),
+        ScopeTab::Marketplace => draw_scope_marketplace(frame, app, layout[1]),
+        ScopeTab::Files | ScopeTab::Select => draw_scope_constraint(frame, app, layout[1]),
+    }
 }
 
 fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
@@ -706,10 +787,6 @@ fn draw_toast(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
             ToastLevel::Error => Style::default().fg(Theme::error()),
         };
         lines.push(Line::from(Span::styled(toast.message.as_str(), style)));
-    }
-
-    if lines.is_empty() {
-        lines.push(Line::from("No recent notifications"));
     }
 
     frame.render_widget(Paragraph::new(lines), area);

@@ -49,10 +49,10 @@ pub fn reduce(app: &mut AppState, action: Action) {
         Action::NextStage => app.set_stage(app.stage.next()),
         Action::PrevStage => app.set_stage(app.stage.prev()),
         Action::NextScopeTab => {
-            app.scope_tab = app.scope_tab.next();
+            app.next_scope_tab();
         }
         Action::PrevScopeTab => {
-            app.scope_tab = app.scope_tab.prev();
+            app.prev_scope_tab();
         }
         Action::ToggleNamingTab => {
             app.naming_tab = app.naming_tab.next();
@@ -146,7 +146,7 @@ fn handle_left(app: &mut AppState) {
             if app.scope_tab == ScopeTab::Files {
                 app.collapse_current();
             } else {
-                app.scope_tab = app.scope_tab.prev();
+                app.prev_scope_tab();
             }
         }
         Stage::Naming => {
@@ -166,7 +166,7 @@ fn handle_right(app: &mut AppState) {
             if app.scope_tab == ScopeTab::Files {
                 app.expand_current();
             } else {
-                app.scope_tab = app.scope_tab.next();
+                app.next_scope_tab();
             }
         }
         Stage::Naming => {
@@ -250,61 +250,73 @@ fn handle_mouse_click(app: &mut AppState, col: u16, row: u16) {
                 .find(|tab| contains(tab.rect, col, row))
                 .map(|tab| tab.value)
             {
-                app.scope_tab = tab;
+                app.set_scope_tab(tab);
                 return;
             }
 
-            if app.scope_tab == ScopeTab::Files {
-                if let Some(hit) = app
-                    .ui_map
-                    .file_rows
-                    .iter()
-                    .find(|hit| contains(hit.rect, col, row))
-                {
-                    app.tree.cursor = hit.index;
-                    app.tree.fix_cursor();
-                    app.toggle_scope_file_selection();
-                }
-            } else if app.scope_tab == ScopeTab::Select {
-                if let Some(hit) = app
-                    .ui_map
-                    .select_rows
-                    .iter()
-                    .find(|hit| contains(hit.rect, col, row))
-                {
-                    app.select_cursor = hit.index;
-                    app.toggle_current_scope_filter();
-                }
-            } else if app.scope_tab == ScopeTab::Constraint {
-                if let Some(hit) = app
-                    .ui_map
-                    .constraint_rows
-                    .iter()
-                    .find(|hit| contains(hit.rect, col, row))
-                {
-                    app.constraint_cursor = hit.index;
-                    app.toggle_current_scope_filter();
-                }
-            } else if app.scope_tab == ScopeTab::Preset {
-                if let Some(hit) = app
-                    .ui_map
-                    .preset_rows
-                    .iter()
-                    .find(|hit| contains(hit.rect, col, row))
-                {
-                    app.preset_cursor = hit.index;
-                    app.load_preset((hit.index + 1) as u8);
-                }
-            } else if app.scope_tab == ScopeTab::Marketplace {
-                if let Some(hit) = app
-                    .ui_map
-                    .marketplace_rows
-                    .iter()
-                    .find(|hit| contains(hit.rect, col, row))
-                {
-                    app.marketplace_cursor = hit.index;
-                    app.apply_marketplace(hit.index);
-                }
+            if let Some(index) = app
+                .ui_map
+                .file_rows
+                .iter()
+                .find(|hit| contains(hit.rect, col, row))
+                .map(|hit| hit.index)
+            {
+                app.set_scope_tab(ScopeTab::Files);
+                app.tree.cursor = index;
+                app.tree.fix_cursor();
+                app.toggle_scope_file_selection();
+                return;
+            }
+
+            if let Some(index) = app
+                .ui_map
+                .select_rows
+                .iter()
+                .find(|hit| contains(hit.rect, col, row))
+                .map(|hit| hit.index)
+            {
+                app.set_scope_tab(ScopeTab::Select);
+                app.select_cursor = index;
+                app.toggle_current_scope_filter();
+                return;
+            }
+
+            if let Some(index) = app
+                .ui_map
+                .constraint_rows
+                .iter()
+                .find(|hit| contains(hit.rect, col, row))
+                .map(|hit| hit.index)
+            {
+                app.set_scope_tab(ScopeTab::Constraint);
+                app.constraint_cursor = index;
+                app.toggle_current_scope_filter();
+                return;
+            }
+
+            if let Some(index) = app
+                .ui_map
+                .preset_rows
+                .iter()
+                .find(|hit| contains(hit.rect, col, row))
+                .map(|hit| hit.index)
+            {
+                app.set_scope_tab(ScopeTab::Preset);
+                app.preset_cursor = index;
+                app.load_preset((index + 1) as u8);
+                return;
+            }
+
+            if let Some(index) = app
+                .ui_map
+                .marketplace_rows
+                .iter()
+                .find(|hit| contains(hit.rect, col, row))
+                .map(|hit| hit.index)
+            {
+                app.set_scope_tab(ScopeTab::Marketplace);
+                app.marketplace_cursor = index;
+                app.apply_marketplace(index);
             }
         }
         Stage::Naming => {

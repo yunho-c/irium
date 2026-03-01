@@ -19,6 +19,7 @@ The app scans the current working directory and opens a three-stage TUI:
 ### Global
 
 - `q`: quit
+- `Ctrl+C`: quit immediately
 - `?`: toggle help
 - `[` / `]`: previous / next stage
 - `Tab` / `Shift+Tab`: next / previous focus pane

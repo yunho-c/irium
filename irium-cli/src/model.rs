@@ -50,14 +50,6 @@ pub enum ScopeTab {
 }
 
 impl ScopeTab {
-    pub const ALL: [ScopeTab; 5] = [
-        ScopeTab::Files,
-        ScopeTab::Select,
-        ScopeTab::Constraint,
-        ScopeTab::Preset,
-        ScopeTab::Marketplace,
-    ];
-
     pub fn title(self) -> &'static str {
         match self {
             ScopeTab::Files => "Files",
@@ -480,6 +472,8 @@ pub struct AppState {
     pub cwd: PathBuf,
     pub stage: Stage,
     pub scope_tab: ScopeTab,
+    pub scope_left_tab: ScopeTab,
+    pub scope_right_tab: ScopeTab,
     pub naming_tab: NamingTab,
     pub focus: FocusPane,
     pub mode: InputMode,

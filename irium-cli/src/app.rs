@@ -23,6 +23,8 @@ impl AppState {
             cwd,
             stage: Stage::Scope,
             scope_tab: ScopeTab::Files,
+            scope_left_tab: ScopeTab::Files,
+            scope_right_tab: ScopeTab::Constraint,
             naming_tab: NamingTab::Suggestions,
             focus: FocusPane::ScopeMain,
             mode: InputMode::Normal,
@@ -76,6 +78,24 @@ impl AppState {
         app.reload_tree();
         app.sync_rename_rows();
         app
+    }
+
+    pub fn set_scope_tab(&mut self, tab: ScopeTab) {
+        self.scope_tab = tab;
+        match tab {
+            ScopeTab::Files | ScopeTab::Select => self.scope_left_tab = tab,
+            ScopeTab::Constraint | ScopeTab::Preset | ScopeTab::Marketplace => {
+                self.scope_right_tab = tab;
+            }
+        }
+    }
+
+    pub fn next_scope_tab(&mut self) {
+        self.set_scope_tab(self.scope_tab.next());
+    }
+
+    pub fn prev_scope_tab(&mut self) {
+        self.set_scope_tab(self.scope_tab.prev());
     }
 
     pub fn stage_focuses(&self) -> &'static [FocusPane] {
@@ -579,7 +599,7 @@ impl AppState {
         let preset: MarketplacePreset = self.marketplace_presets[idx].clone();
         self.selected_extensions = preset.extensions.iter().cloned().collect();
         self.time_constraint = preset.time_constraint;
-        self.scope_tab = ScopeTab::Select;
+        self.set_scope_tab(ScopeTab::Select);
         self.sync_rename_rows();
         self.push_toast(
             ToastLevel::Success,

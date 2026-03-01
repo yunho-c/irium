@@ -24,6 +24,12 @@ pub fn map_event(app: &AppState, event: Event) -> Vec<Action> {
 }
 
 fn map_key(app: &AppState, key: KeyEvent) -> Vec<Action> {
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
+    {
+        return vec![Action::Quit];
+    }
+
     match app.mode {
         InputMode::EditingOverride | InputMode::Command | InputMode::NewCategory => {
             map_text_input_keys(app, key)

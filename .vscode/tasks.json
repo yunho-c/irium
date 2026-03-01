@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Install irium-cli (`irm`) globally",
+      "type": "shell",
+      "command": "cargo install --path .",
+      "args": [],
+      "options": {
+        "cwd": "${workspaceFolder}/irium-cli"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
