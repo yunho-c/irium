@@ -261,25 +261,34 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     {
         let node = &app.tree.nodes[row.node_id];
         let indent = "  ".repeat(row.depth as usize);
-        let branch = if node.is_dir {
-            if node.expanded { "▾" } else { "▸" }
-        } else {
-            "•"
-        };
+        let icon = node_icon(node);
         let mark = if app.node_selected_for_display(row.node_id) {
             "[x]"
         } else {
             "[ ]"
         };
-        let unreadable = if node.unreadable { " !" } else { "" };
-        let line = format!("{indent}{branch} {mark} {}{unreadable}", node.name);
+        let mut line = vec![
+            Span::raw(indent),
+            Span::raw(mark),
+            Span::raw(" "),
+            if node.is_dir {
+                Span::styled(icon, Theme::accent_text())
+            } else {
+                Span::raw(icon)
+            },
+            Span::raw(" "),
+            Span::raw(node.name.as_str()),
+        ];
+        if node.unreadable {
+            line.push(Span::raw(" !"));
+        }
 
         let style = if idx == app.tree.cursor {
             Theme::selected_row()
         } else {
             Theme::panel()
         };
-        items.push(ListItem::new(line).style(style));
+        items.push(ListItem::new(Line::from(line)).style(style));
 
         let y = area.y + (idx - app.tree.scroll) as u16;
         app.click_regions.register(
@@ -381,6 +390,33 @@ fn fit_to_width(text: &str, width: usize) -> String {
     let mut out = text.chars().take(width - 1).collect::<String>();
     out.push('…');
     out
+}
+
+fn node_icon(node: &crate::model::FileNode) -> &'static str {
+    if node.is_dir {
+        return if node.expanded { "\u{f07c}" } else { "\u{f07b}" };
+    }
+
+    let ext = node
+        .path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    match ext.as_str() {
+        // Photos
+        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "tif" | "tiff" | "heic" | "heif"
+        | "svg" => "\u{f03e}",
+        // PDFs
+        "pdf" => "\u{f1c1}",
+        // Audio
+        "mp3" | "wav" | "flac" | "aac" | "m4a" | "ogg" | "opus" => "\u{f001}",
+        // Video
+        "mp4" | "mov" | "mkv" | "avi" | "webm" | "m4v" | "mpg" | "mpeg" => "\u{f03d}",
+        // Generic file fallback
+        _ => "\u{f15b}",
+    }
 }
 
 fn draw_scope_constraint(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
