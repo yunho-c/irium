@@ -19,6 +19,7 @@ pub enum Action {
     ExpandAll,
     CollapseAll,
     ToggleSelect,
+    SelectAllVisibleFiles,
     ToggleShowHidden,
     SavePreset(u8),
     LoadPreset(u8),
@@ -64,6 +65,14 @@ pub fn reduce(app: &mut AppState, action: Action) {
         Action::ExpandAll => app.expand_all_current(),
         Action::CollapseAll => app.collapse_all_current(),
         Action::ToggleSelect => handle_toggle_select(app),
+        Action::SelectAllVisibleFiles => {
+            if app.stage == Stage::Scope
+                && app.scope_tab == ScopeTab::Files
+                && app.focus == FocusPane::ScopeFiles
+            {
+                app.select_all_visible_files();
+            }
+        }
         Action::ToggleShowHidden => app.toggle_show_hidden(),
         Action::SavePreset(slot) => app.save_preset(slot),
         Action::LoadPreset(slot) => app.load_preset(slot),

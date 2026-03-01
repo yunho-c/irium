@@ -509,7 +509,7 @@ impl AppState {
             return;
         };
 
-        let selected = !self.tree.nodes[node_id].selected;
+        let selected = !self.node_selected_for_display(node_id);
         if let Err(error) = self.set_node_selected(node_id, selected) {
             self.push_toast(
                 ToastLevel::Error,
@@ -517,6 +517,113 @@ impl AppState {
             );
         }
         self.sync_rename_rows();
+    }
+
+    pub fn select_all_visible_files(&mut self) {
+        let mut all_file_nodes = Vec::new();
+        let mut had_unreadable = false;
+        self.collect_file_nodes_recursive(self.tree.root, &mut all_file_nodes, &mut had_unreadable);
+
+        if all_file_nodes.is_empty() {
+            self.push_toast(ToastLevel::Warning, "No files to select");
+            self.sync_rename_rows();
+            return;
+        }
+
+        let all_selected = all_file_nodes
+            .iter()
+            .all(|node_id| self.tree.nodes[*node_id].selected);
+
+        for node_id in &all_file_nodes {
+            self.tree.nodes[*node_id].selected = !all_selected;
+            let path = self.tree.nodes[*node_id].path.clone();
+            if all_selected {
+                self.selected_by_tree.remove(&path);
+            } else {
+                self.selected_by_tree.insert(path);
+            }
+        }
+
+        let affected = all_file_nodes.len();
+        if all_selected {
+            self.push_toast(
+                ToastLevel::Success,
+                format!("Deselected {affected} file(s)"),
+            );
+        } else {
+            self.push_toast(
+                ToastLevel::Success,
+                format!("Selected {affected} file(s)"),
+            );
+        }
+        if had_unreadable {
+            self.push_toast(
+                ToastLevel::Warning,
+                "Some folders could not be read; selection may be partial",
+            );
+        }
+        self.sync_rename_rows();
+    }
+
+    fn collect_file_nodes_recursive(
+        &mut self,
+        node_id: usize,
+        out: &mut Vec<usize>,
+        had_unreadable: &mut bool,
+    ) {
+        if !self.tree.nodes[node_id].is_dir {
+            out.push(node_id);
+            return;
+        }
+
+        if let Err(_error) = self.ensure_children_loaded(node_id) {
+            *had_unreadable = true;
+            return;
+        }
+
+        let children = self.tree.nodes[node_id].children.clone();
+        for child in children {
+            self.collect_file_nodes_recursive(child, out, had_unreadable);
+        }
+    }
+
+    pub fn node_selected_for_display(&self, node_id: usize) -> bool {
+        let node = &self.tree.nodes[node_id];
+        if !node.is_dir {
+            return node.selected;
+        }
+
+        let (has_descendants, all_selected) = self.subtree_selection_state(node_id);
+        if has_descendants {
+            all_selected
+        } else {
+            node.selected
+        }
+    }
+
+    fn subtree_selection_state(&self, node_id: usize) -> (bool, bool) {
+        let node = &self.tree.nodes[node_id];
+        if !node.is_dir {
+            return (true, node.selected);
+        }
+
+        if !node.children_loaded {
+            // Treat unloaded directories as a single unit using their explicit selection bit.
+            return (true, node.selected);
+        }
+
+        let mut has_descendants = false;
+        let mut all_selected = true;
+        for child_id in &node.children {
+            let (child_has_descendants, child_all_selected) =
+                self.subtree_selection_state(*child_id);
+            if child_has_descendants {
+                has_descendants = true;
+                all_selected &= child_all_selected;
+            }
+        }
+
+        (has_descendants, all_selected)
     }
 
     fn set_node_selected(&mut self, node_id: usize, selected: bool) -> Result<(), String> {
@@ -1086,5 +1193,193 @@ mod tests {
         app.submit_simulated(true);
 
         assert!(!app.toasts.is_empty());
+    }
+
+    #[test]
+    fn select_all_visible_files_marks_visible_file_nodes_selected() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = AppState::new(cwd);
+
+        let visible_file_nodes: Vec<usize> = app
+            .tree
+            .visible_nodes()
+            .into_iter()
+            .map(|row| row.node_id)
+            .filter(|node_id| !app.tree.nodes[*node_id].is_dir)
+            .collect();
+
+        app.select_all_visible_files();
+
+        for node_id in &visible_file_nodes {
+            assert!(app.tree.nodes[*node_id].selected);
+            assert!(app.selected_by_tree.contains(&app.tree.nodes[*node_id].path));
+        }
+    }
+
+    #[test]
+    fn select_all_visible_files_toggles_to_deselect_when_all_selected() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = AppState::new(cwd);
+
+        let visible_file_nodes: Vec<usize> = app
+            .tree
+            .visible_nodes()
+            .into_iter()
+            .map(|row| row.node_id)
+            .filter(|node_id| !app.tree.nodes[*node_id].is_dir)
+            .collect();
+
+        app.select_all_visible_files();
+        app.select_all_visible_files();
+
+        for node_id in &visible_file_nodes {
+            assert!(!app.tree.nodes[*node_id].selected);
+            assert!(!app.selected_by_tree.contains(&app.tree.nodes[*node_id].path));
+        }
+    }
+
+    #[test]
+    fn select_all_visible_files_includes_nested_files_inside_folders() {
+        let unique = format!(
+            "irium-select-all-nested-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        let nested_dir = root.join("nested").join("deeper");
+        std::fs::create_dir_all(&nested_dir).expect("create nested dirs");
+        let nested_file = nested_dir.join("inside.txt");
+        std::fs::write(&nested_file, b"x").expect("write nested file");
+        let top_file = root.join("top.txt");
+        std::fs::write(&top_file, b"y").expect("write top file");
+
+        let mut app = AppState::new(root.clone());
+        app.select_all_visible_files();
+
+        assert!(app.selected_by_tree.contains(&top_file));
+        assert!(app.selected_by_tree.contains(&nested_file));
+
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn directory_renders_selected_when_all_children_selected() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = AppState::new(cwd);
+        app.tree = FileTree {
+            nodes: vec![
+                FileNode {
+                    parent: None,
+                    path: PathBuf::from("."),
+                    name: ".".to_string(),
+                    is_dir: true,
+                    children: vec![1],
+                    children_loaded: true,
+                    expanded: true,
+                    selected: false,
+                    unreadable: false,
+                },
+                FileNode {
+                    parent: Some(0),
+                    path: PathBuf::from("./docs"),
+                    name: "docs".to_string(),
+                    is_dir: true,
+                    children: vec![2, 3],
+                    children_loaded: true,
+                    expanded: true,
+                    selected: false,
+                    unreadable: false,
+                },
+                FileNode {
+                    parent: Some(1),
+                    path: PathBuf::from("./docs/a.txt"),
+                    name: "a.txt".to_string(),
+                    is_dir: false,
+                    children: vec![],
+                    children_loaded: false,
+                    expanded: false,
+                    selected: true,
+                    unreadable: false,
+                },
+                FileNode {
+                    parent: Some(1),
+                    path: PathBuf::from("./docs/b.txt"),
+                    name: "b.txt".to_string(),
+                    is_dir: false,
+                    children: vec![],
+                    children_loaded: false,
+                    expanded: false,
+                    selected: true,
+                    unreadable: false,
+                },
+            ],
+            root: 0,
+            cursor: 0,
+            scroll: 0,
+        };
+
+        assert!(app.node_selected_for_display(1));
+    }
+
+    #[test]
+    fn directory_renders_unselected_when_any_child_unselected() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = AppState::new(cwd);
+        app.tree = FileTree {
+            nodes: vec![
+                FileNode {
+                    parent: None,
+                    path: PathBuf::from("."),
+                    name: ".".to_string(),
+                    is_dir: true,
+                    children: vec![1],
+                    children_loaded: true,
+                    expanded: true,
+                    selected: false,
+                    unreadable: false,
+                },
+                FileNode {
+                    parent: Some(0),
+                    path: PathBuf::from("./docs"),
+                    name: "docs".to_string(),
+                    is_dir: true,
+                    children: vec![2, 3],
+                    children_loaded: true,
+                    expanded: true,
+                    selected: false,
+                    unreadable: false,
+                },
+                FileNode {
+                    parent: Some(1),
+                    path: PathBuf::from("./docs/a.txt"),
+                    name: "a.txt".to_string(),
+                    is_dir: false,
+                    children: vec![],
+                    children_loaded: false,
+                    expanded: false,
+                    selected: true,
+                    unreadable: false,
+                },
+                FileNode {
+                    parent: Some(1),
+                    path: PathBuf::from("./docs/b.txt"),
+                    name: "b.txt".to_string(),
+                    is_dir: false,
+                    children: vec![],
+                    children_loaded: false,
+                    expanded: false,
+                    selected: false,
+                    unreadable: false,
+                },
+            ],
+            root: 0,
+            cursor: 0,
+            scroll: 0,
+        };
+
+        assert!(!app.node_selected_for_display(1));
     }
 }

@@ -30,6 +30,7 @@ The app scans the current working directory and opens a three-stage TUI:
 - `T`: previous scope tab
 - `Up` / `Down`: move cursor
 - `Space`: toggle select/filter item
+- `A`: toggle select/deselect all files in the Files section (recursive)
 - `Right`: expand folder (Files tab)
 - `Left`: collapse folder (Files tab)
 - `Ctrl+Right`: expand subtree recursively (Files tab)

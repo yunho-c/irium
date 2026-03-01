@@ -266,7 +266,11 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         } else {
             "•"
         };
-        let mark = if node.selected { "[x]" } else { "[ ]" };
+        let mark = if app.node_selected_for_display(row.node_id) {
+            "[x]"
+        } else {
+            "[ ]"
+        };
         let unreadable = if node.unreadable { " !" } else { "" };
         let line = format!("{indent}{branch} {mark} {}{unreadable}", node.name);
 

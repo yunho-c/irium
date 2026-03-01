@@ -4,7 +4,7 @@ use crossterm::event::{
 
 use crate::{
     actions::Action,
-    model::{AppState, InputMode, ScopeTab, Stage},
+    model::{AppState, FocusPane, InputMode, ScopeTab, Stage},
 };
 
 pub fn map_event(app: &AppState, event: Event) -> Vec<Action> {
@@ -61,6 +61,17 @@ fn map_group_keys(key: KeyEvent) -> Vec<Action> {
 }
 
 fn map_normal_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        && matches!(key.code, KeyCode::Char('a') | KeyCode::Char('A'))
+        && app.stage == Stage::Scope
+        && app.scope_tab == ScopeTab::Files
+        && app.focus == FocusPane::ScopeFiles
+    {
+        return vec![Action::SelectAllVisibleFiles];
+    }
+
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         return map_ctrl_keys(app, key);
     }
@@ -129,5 +140,42 @@ fn map_ctrl_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
             }
         }
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+    use super::map_event;
+    use crate::{
+        actions::Action,
+        model::{FocusPane, ScopeTab, Stage},
+    };
+
+    #[test]
+    fn ctrl_a_does_not_map_to_select_all_in_scope_files() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = crate::model::AppState::new(cwd);
+        app.set_stage(Stage::Scope);
+        app.set_scope_tab(ScopeTab::Files);
+        app.set_focus(FocusPane::ScopeFiles);
+
+        let event = Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        let actions = map_event(&app, event);
+        assert!(!matches!(actions.as_slice(), [Action::SelectAllVisibleFiles]));
+    }
+
+    #[test]
+    fn a_maps_to_select_all_in_scope_files() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = crate::model::AppState::new(cwd);
+        app.set_stage(Stage::Scope);
+        app.set_scope_tab(ScopeTab::Files);
+        app.set_focus(FocusPane::ScopeFiles);
+
+        let event = Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        let actions = map_event(&app, event);
+        assert!(matches!(actions.as_slice(), [Action::SelectAllVisibleFiles]));
     }
 }
