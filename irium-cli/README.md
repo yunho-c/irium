@@ -31,6 +31,8 @@ The app scans the current working directory and opens a three-stage TUI:
 - `Up` / `Down`: move cursor
 - `Space`: toggle select/filter item
 - `A`: toggle select/deselect all visible files in the Files section (respects active Files filters/settings)
+- `p`: open/close Files settings popup
+- `v`: toggle `Show selected categories only` (Files section)
 - `Right`: expand folder (Files tab)
 - `Left`: collapse folder (Files tab)
 - `Ctrl+Right`: expand subtree recursively (Files tab)

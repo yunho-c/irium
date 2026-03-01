@@ -72,7 +72,7 @@ impl AppState {
             help_lines: vec![
                 Line::from("Global: q quit | [ / ] stage | Tab focus | ? help"),
                 Line::from(
-                    "Files: arrows move | Space select | Left/Right collapse/expand | Ctrl+Right expand all",
+                    "Files: arrows move | Space select | A select-all | p settings | v toggle category-filter",
                 ),
                 Line::from(
                     "Naming: e edit override | g then 1-9 assign group | / style command | Enter apply",

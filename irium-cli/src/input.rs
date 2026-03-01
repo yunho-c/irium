@@ -71,6 +71,26 @@ fn map_normal_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
     {
         return vec![Action::SelectAllVisibleFiles];
     }
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        && matches!(key.code, KeyCode::Char('p') | KeyCode::Char('P'))
+        && app.stage == Stage::Scope
+        && app.scope_tab == ScopeTab::Files
+        && app.focus == FocusPane::ScopeFiles
+    {
+        return vec![Action::ToggleFilesSettingsPopup];
+    }
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+        && app.stage == Stage::Scope
+        && app.scope_tab == ScopeTab::Files
+        && app.focus == FocusPane::ScopeFiles
+    {
+        return vec![Action::ToggleShowSelectedCategoriesOnly];
+    }
 
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         return map_ctrl_keys(app, key);
@@ -177,5 +197,34 @@ mod tests {
         let event = Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
         let actions = map_event(&app, event);
         assert!(matches!(actions.as_slice(), [Action::SelectAllVisibleFiles]));
+    }
+
+    #[test]
+    fn p_maps_to_toggle_files_settings_in_scope_files() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = crate::model::AppState::new(cwd);
+        app.set_stage(Stage::Scope);
+        app.set_scope_tab(ScopeTab::Files);
+        app.set_focus(FocusPane::ScopeFiles);
+
+        let event = Event::Key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+        let actions = map_event(&app, event);
+        assert!(matches!(actions.as_slice(), [Action::ToggleFilesSettingsPopup]));
+    }
+
+    #[test]
+    fn v_maps_to_toggle_selected_categories_visibility_in_scope_files() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = crate::model::AppState::new(cwd);
+        app.set_stage(Stage::Scope);
+        app.set_scope_tab(ScopeTab::Files);
+        app.set_focus(FocusPane::ScopeFiles);
+
+        let event = Event::Key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
+        let actions = map_event(&app, event);
+        assert!(matches!(
+            actions.as_slice(),
+            [Action::ToggleShowSelectedCategoriesOnly]
+        ));
     }
 }

@@ -20,6 +20,8 @@ pub enum Action {
     CollapseAll,
     ToggleSelect,
     SelectAllVisibleFiles,
+    ToggleFilesSettingsPopup,
+    ToggleShowSelectedCategoriesOnly,
     ToggleShowHidden,
     SavePreset(u8),
     LoadPreset(u8),
@@ -71,6 +73,22 @@ pub fn reduce(app: &mut AppState, action: Action) {
                 && app.focus == FocusPane::ScopeFiles
             {
                 app.select_all_visible_files();
+            }
+        }
+        Action::ToggleFilesSettingsPopup => {
+            if app.stage == Stage::Scope
+                && app.scope_tab == ScopeTab::Files
+                && app.focus == FocusPane::ScopeFiles
+            {
+                app.toggle_files_settings_popup();
+            }
+        }
+        Action::ToggleShowSelectedCategoriesOnly => {
+            if app.stage == Stage::Scope
+                && app.scope_tab == ScopeTab::Files
+                && app.focus == FocusPane::ScopeFiles
+            {
+                app.toggle_show_selected_categories_only();
             }
         }
         Action::ToggleShowHidden => app.toggle_show_hidden(),

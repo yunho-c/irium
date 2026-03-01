@@ -166,17 +166,21 @@ fn draw_scope_left(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         "Files"
     };
     frame.render_widget(focus_block(files_title, files_focus), sections[1]);
-    if sections[1].width > 2 {
+    let settings_label = "\u{f013} [p]";
+    let settings_width = settings_label.chars().count() as u16;
+    if sections[1].width > settings_width + 1 {
         let icon_area = Rect::new(
-            sections[1].x + sections[1].width.saturating_sub(2),
+            sections[1].x + sections[1].width.saturating_sub(settings_width + 1),
             sections[1].y,
-            1,
+            settings_width,
             1,
         );
-        frame.render_widget(
-            Paragraph::new(Span::styled("\u{f013}", Theme::accent_text())),
-            icon_area,
-        );
+        let icon_line = Line::from(vec![
+            Span::styled("\u{f013}", Theme::accent_text()),
+            Span::raw(" "),
+            Span::raw("[p]"),
+        ]);
+        frame.render_widget(Paragraph::new(icon_line), icon_area);
         app.click_regions
             .register(icon_area, ClickTarget::ScopeFilesSettingsButton);
     }
@@ -354,7 +358,7 @@ fn draw_files_settings_popup(frame: &mut Frame<'_>, app: &mut AppState, area: Re
     } else {
         "[ ]"
     };
-    let row = format!("{mark} Show selected categories only");
+    let row = format!("{mark} Show selected categories only [v]");
     frame.render_widget(Paragraph::new(row).style(Theme::panel()), inner);
     app.click_regions.register(
         Rect::new(inner.x, inner.y, inner.width, 1),
