@@ -495,4 +495,5 @@ pub struct AppState {
 
     pub selected_by_tree: HashSet<PathBuf>,
     pub filter_cache: HashMap<PathBuf, bool>,
+    pub category_match_dirs: HashSet<PathBuf>,
 }

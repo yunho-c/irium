@@ -81,6 +81,7 @@ impl AppState {
             ],
             selected_by_tree: HashSet::new(),
             filter_cache: HashMap::new(),
+            category_match_dirs: HashSet::new(),
         };
 
         app.sync_focus_manager();
@@ -239,11 +240,7 @@ impl AppState {
         if !self.show_selected_categories_only {
             return rows;
         }
-
-        let mut directory_match_cache: HashMap<PathBuf, bool> = HashMap::new();
-        rows.retain(|row| {
-            self.node_matches_selected_categories(row.node_id, &mut directory_match_cache)
-        });
+        rows.retain(|row| self.node_matches_selected_categories(row.node_id));
         rows
     }
 
@@ -287,25 +284,10 @@ impl AppState {
         );
     }
 
-    fn node_matches_selected_categories(
-        &self,
-        node_id: usize,
-        directory_match_cache: &mut HashMap<PathBuf, bool>,
-    ) -> bool {
+    fn node_matches_selected_categories(&self, node_id: usize) -> bool {
         let node = &self.tree.nodes[node_id];
         if node.is_dir {
-            if let Some(cached) = directory_match_cache.get(&node.path) {
-                return *cached;
-            }
-
-            let has_matching_descendant = fs_scan::collect_files(&node.path, self.show_hidden, 2500)
-                .into_iter()
-                .any(|entry| {
-                    let ext = entry.extension.unwrap_or_default();
-                    self.selected_extensions.contains(&ext)
-                });
-            directory_match_cache.insert(node.path.clone(), has_matching_descendant);
-            return has_matching_descendant;
+            return self.category_match_dirs.contains(&node.path);
         }
 
         let ext = node
@@ -882,6 +864,7 @@ impl AppState {
 
     pub fn sync_rename_rows(&mut self) {
         let all_files = fs_scan::collect_files(&self.cwd, self.show_hidden, 2500);
+        self.rebuild_category_match_dirs(&all_files);
         let mut include_paths = HashSet::new();
 
         for path in &self.selected_by_tree {
@@ -943,6 +926,32 @@ impl AppState {
         }
 
         self.recompute_conflicts();
+    }
+
+    fn rebuild_category_match_dirs(&mut self, all_files: &[FsEntry]) {
+        self.category_match_dirs.clear();
+        if self.selected_extensions.is_empty() {
+            return;
+        }
+
+        for entry in all_files {
+            let ext = entry.extension.as_deref().unwrap_or_default();
+            if !self.selected_extensions.contains(ext) {
+                continue;
+            }
+
+            let mut parent = entry.path.parent();
+            while let Some(dir) = parent {
+                if !dir.starts_with(&self.cwd) {
+                    break;
+                }
+                self.category_match_dirs.insert(dir.to_path_buf());
+                if dir == self.cwd {
+                    break;
+                }
+                parent = dir.parent();
+            }
+        }
     }
 
     fn propose_name(&self, stem: &str, ext: Option<&str>, override_name: Option<&str>) -> String {
@@ -1387,6 +1396,7 @@ mod tests {
         let mut app = AppState::new(root.clone());
         app.show_selected_categories_only = true;
         app.selected_extensions.insert("pdf".to_string());
+        app.sync_rename_rows();
         app.normalize_scope_files_cursor();
 
         let visible_names: Vec<String> = app
