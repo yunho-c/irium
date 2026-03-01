@@ -255,6 +255,7 @@ fn handle_mouse_click(app: &mut AppState, col: u16, row: u16) {
             app.marketplace_cursor = index;
             app.apply_marketplace(index);
         }
+        ClickTarget::ScopePane(focus) => app.set_focus(focus),
         ClickTarget::NamingPane(focus) => {
             app.set_focus(focus);
             if focus == FocusPane::NamingCommand {
@@ -327,6 +328,43 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
             app.set_scope_tab(ScopeTab::Marketplace);
             app.marketplace_cursor =
                 scroll_index(app.marketplace_cursor, app.marketplace_presets.len(), delta);
+        }
+        ClickTarget::ScopePane(focus) => {
+            app.set_focus(focus);
+            match focus {
+                FocusPane::ScopeCategory => {
+                    app.select_cursor = scroll_index(app.select_cursor, app.category_filters.len(), delta);
+                }
+                FocusPane::ScopeFiles => {
+                    app.tree.cursor = scroll_index(app.tree.cursor, app.tree.visible_nodes().len(), delta);
+                    app.tree.fix_cursor();
+                }
+                FocusPane::ScopeOptions => {
+                    let max_len = match app.scope_right_tab {
+                        ScopeTab::Constraint => {
+                            crate::model::TimeConstraint::ALL.len() + crate::model::SizeConstraint::ALL.len()
+                        }
+                        ScopeTab::Preset => 9,
+                        ScopeTab::Marketplace => app.marketplace_presets.len(),
+                        ScopeTab::Files | ScopeTab::Select => 0,
+                    };
+                    match app.scope_right_tab {
+                        ScopeTab::Constraint => {
+                            app.constraint_cursor =
+                                scroll_index(app.constraint_cursor, max_len, delta);
+                        }
+                        ScopeTab::Preset => {
+                            app.preset_cursor = scroll_index(app.preset_cursor, max_len, delta);
+                        }
+                        ScopeTab::Marketplace => {
+                            app.marketplace_cursor =
+                                scroll_index(app.marketplace_cursor, max_len, delta);
+                        }
+                        ScopeTab::Files | ScopeTab::Select => {}
+                    }
+                }
+                _ => {}
+            }
         }
         ClickTarget::NamingPane(focus) => {
             app.set_focus(focus);

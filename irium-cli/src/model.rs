@@ -109,7 +109,9 @@ impl NamingTab {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FocusPane {
-    ScopeMain,
+    ScopeCategory,
+    ScopeFiles,
+    ScopeOptions,
     NamingTable,
     NamingRight,
     NamingCommand,
@@ -438,6 +440,7 @@ pub enum ClickTarget {
     ScopeConstraintRow(usize),
     ScopePresetRow(usize),
     ScopeMarketplaceRow(usize),
+    ScopePane(FocusPane),
     NamingPane(FocusPane),
     NamingRow(usize),
     NamingSuggestion(usize),

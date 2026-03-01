@@ -26,7 +26,7 @@ impl AppState {
             scope_left_tab: ScopeTab::Files,
             scope_right_tab: ScopeTab::Constraint,
             naming_tab: NamingTab::Suggestions,
-            focus: FocusPane::ScopeMain,
+            focus: FocusPane::ScopeFiles,
             focus_manager: Default::default(),
             mode: InputMode::Normal,
             should_quit: false,
@@ -95,6 +95,18 @@ impl AppState {
                 self.scope_right_tab = tab;
             }
         }
+
+        if self.stage == Stage::Scope {
+            let focus = match tab {
+                ScopeTab::Select => FocusPane::ScopeCategory,
+                ScopeTab::Files => FocusPane::ScopeFiles,
+                ScopeTab::Constraint | ScopeTab::Preset | ScopeTab::Marketplace => {
+                    FocusPane::ScopeOptions
+                }
+            };
+            self.focus = focus;
+            self.focus_manager.set(focus);
+        }
     }
 
     pub fn next_scope_tab(&mut self) {
@@ -107,7 +119,11 @@ impl AppState {
 
     pub fn stage_focuses(&self) -> &'static [FocusPane] {
         match self.stage {
-            Stage::Scope => &[FocusPane::ScopeMain],
+            Stage::Scope => &[
+                FocusPane::ScopeCategory,
+                FocusPane::ScopeFiles,
+                FocusPane::ScopeOptions,
+            ],
             Stage::Naming => &[
                 FocusPane::NamingTable,
                 FocusPane::NamingRight,
@@ -122,6 +138,7 @@ impl AppState {
         if let Some(focus) = self.focus_manager.current() {
             self.focus = *focus;
         }
+        self.sync_scope_tab_from_focus();
     }
 
     pub fn prev_focus(&mut self) {
@@ -129,6 +146,7 @@ impl AppState {
         if let Some(focus) = self.focus_manager.current() {
             self.focus = *focus;
         }
+        self.sync_scope_tab_from_focus();
     }
 
     pub fn set_stage(&mut self, stage: Stage) {
@@ -143,6 +161,28 @@ impl AppState {
     pub fn set_focus(&mut self, focus: FocusPane) {
         self.focus = focus;
         self.focus_manager.set(focus);
+        self.sync_scope_tab_from_focus();
+    }
+
+    fn sync_scope_tab_from_focus(&mut self) {
+        if self.stage != Stage::Scope {
+            return;
+        }
+
+        match self.focus {
+            FocusPane::ScopeCategory => self.scope_tab = ScopeTab::Select,
+            FocusPane::ScopeFiles => self.scope_tab = ScopeTab::Files,
+            FocusPane::ScopeOptions => {
+                if matches!(self.scope_tab, ScopeTab::Files | ScopeTab::Select) {
+                    self.scope_tab = self.scope_right_tab;
+                }
+            }
+            FocusPane::NamingTable
+            | FocusPane::NamingRight
+            | FocusPane::NamingCommand
+            | FocusPane::ApplyReview
+            | FocusPane::ApplyHistory => {}
+        }
     }
 
     fn sync_focus_manager(&mut self) {

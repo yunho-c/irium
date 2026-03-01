@@ -143,8 +143,7 @@ fn draw_scope(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn draw_scope_left(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let focused = app.focus == FocusPane::ScopeMain
-        && matches!(app.scope_tab, ScopeTab::Files | ScopeTab::Select);
+    let focused = matches!(app.focus, FocusPane::ScopeCategory | FocusPane::ScopeFiles);
     frame.render_widget(focus_block("Select", focused), area);
     let inner = inner_rect(area);
     if inner.height < 6 {
@@ -157,23 +156,24 @@ fn draw_scope_left(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .split(inner);
 
     if sections[0].height > 0 && sections[0].width > 0 {
-        draw_scope_select(frame, app, sections[0]);
+        draw_scope_select(frame, app, sections[0], app.focus == FocusPane::ScopeCategory);
     }
 
-    let files_focus = app.focus == FocusPane::ScopeMain && app.scope_tab == ScopeTab::Files;
+    let files_focus = app.focus == FocusPane::ScopeFiles;
     frame.render_widget(focus_block("Files", files_focus), sections[1]);
     let files_inner = inner_rect(sections[1]);
     if files_inner.height > 0 && files_inner.width > 0 {
         draw_scope_files(frame, app, files_inner);
     }
+
+    app.click_regions
+        .register(sections[0], ClickTarget::ScopePane(FocusPane::ScopeCategory));
+    app.click_regions
+        .register(sections[1], ClickTarget::ScopePane(FocusPane::ScopeFiles));
 }
 
 fn draw_scope_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let focused = app.focus == FocusPane::ScopeMain
-        && matches!(
-            app.scope_tab,
-            ScopeTab::Constraint | ScopeTab::Preset | ScopeTab::Marketplace
-        );
+    let focused = app.focus == FocusPane::ScopeOptions;
     frame.render_widget(focus_block("Options", focused), area);
     let inner = inner_rect(area);
     if inner.height < 3 {
@@ -223,6 +223,9 @@ fn draw_scope_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         ScopeTab::Marketplace => draw_scope_marketplace(frame, app, layout[1]),
         ScopeTab::Files | ScopeTab::Select => draw_scope_constraint(frame, app, layout[1]),
     }
+
+    app.click_regions
+        .register(layout[1], ClickTarget::ScopePane(FocusPane::ScopeOptions));
 }
 
 fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
@@ -284,11 +287,8 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     frame.render_widget(List::new(items), area);
 }
 
-fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    frame.render_widget(
-        Block::default().title("Category").borders(Borders::ALL),
-        area,
-    );
+fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect, focused: bool) {
+    frame.render_widget(focus_block("Category", focused), area);
     let inner = inner_rect(area);
     if inner.width < 6 || inner.height < 3 {
         return;
