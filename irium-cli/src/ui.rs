@@ -285,64 +285,98 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(67), Constraint::Percentage(33)])
-        .split(area);
+    frame.render_widget(
+        Block::default().title("Category").borders(Borders::ALL),
+        area,
+    );
+    let inner = inner_rect(area);
+    if inner.width < 6 || inner.height < 3 {
+        return;
+    }
 
-    let mut left_items = Vec::new();
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+
+    let left_width = (sections[0].width as usize * 36 / 100).clamp(8, sections[0].width as usize);
+    let gap = 2usize;
+    let right_width = sections[0]
+        .width
+        .saturating_sub(left_width as u16)
+        .saturating_sub(gap as u16) as usize;
+
+    let header = Line::from(vec![
+        Span::styled(
+            fit_to_width("Category", left_width),
+            Theme::accent_text(),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            fit_to_width("Extensions", right_width),
+            Theme::accent_text(),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(header), sections[0]);
+
+    let mut items = Vec::new();
     for (idx, category) in app.category_filters.iter().enumerate() {
-        let checked = category
+        let is_active = category
             .extensions
             .iter()
             .all(|ext| app.selected_extensions.contains(ext));
-        let mark = if checked { "[x]" } else { "[ ]" };
-        let preview = category.extensions.join(",");
-        let line = format!("{mark} {} ({preview})", category.name);
+        let extensions = category.extensions.join(",");
+        let line = Line::from(vec![
+            Span::raw(fit_to_width(&category.name, left_width)),
+            Span::raw("  "),
+            Span::styled(
+                fit_to_width(&extensions, right_width),
+                if is_active {
+                    Theme::accent_text()
+                } else {
+                    Theme::muted_text()
+                },
+            ),
+        ]);
         let style = if idx == app.select_cursor {
             Theme::selected_row()
         } else {
             Theme::panel()
         };
-        left_items.push(ListItem::new(line).style(style));
+        items.push(ListItem::new(line).style(style));
 
-        let y = cols[0].y + idx as u16;
-        if y < cols[0].y + cols[0].height {
+        let y = sections[1].y + idx as u16;
+        if y < sections[1].y + sections[1].height {
             app.click_regions.register(
-                Rect::new(cols[0].x, y, cols[0].width, 1),
+                Rect::new(sections[1].x, y, sections[1].width, 1),
                 ClickTarget::ScopeCategoryRow(idx),
             );
         }
     }
 
     frame.render_widget(
-        List::new(left_items).block(
-            Block::default()
-                .title("Category Filters")
-                .borders(Borders::ALL),
-        ),
-        cols[0],
+        List::new(items),
+        sections[1],
     );
+}
 
-    let summary = if app.selected_extensions.is_empty() {
-        "No extension filters active\n(renaming uses tree selection)".to_string()
-    } else {
-        format!(
-            "Active extensions:\n{}",
-            app.selected_extensions
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-    frame.render_widget(
-        Paragraph::new(summary)
-            .block(Block::default().title("Active").borders(Borders::ALL))
-            .style(Theme::muted_text())
-            .wrap(Wrap { trim: true }),
-        cols[1],
-    );
+fn fit_to_width(text: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+
+    let text_len = text.chars().count();
+    if text_len <= width {
+        return format!("{text:<width$}");
+    }
+
+    if width == 1 {
+        return "…".to_string();
+    }
+
+    let mut out = text.chars().take(width - 1).collect::<String>();
+    out.push('…');
+    out
 }
 
 fn draw_scope_constraint(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
