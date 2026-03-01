@@ -107,13 +107,27 @@ fn apply_length(mut words: Vec<String>, length: NameLength) -> Vec<String> {
             continue;
         }
         let room = max_chars - total;
-        if word.len() > room {
-            word.truncate(room);
+        let word_chars = word.chars().count();
+        if word_chars > room {
+            truncate_to_char_count(word, room);
         }
-        total += word.len();
+        total += word.chars().count();
     }
 
     words.into_iter().filter(|w| !w.is_empty()).collect()
+}
+
+fn truncate_to_char_count(value: &mut String, max_chars: usize) {
+    if value.chars().count() <= max_chars {
+        return;
+    }
+
+    let truncate_at = value
+        .char_indices()
+        .nth(max_chars)
+        .map(|(idx, _)| idx)
+        .unwrap_or(value.len());
+    value.truncate(truncate_at);
 }
 
 fn apply_capitalization(words: &[String], capitalization: Capitalization) -> Vec<String> {
@@ -326,6 +340,20 @@ mod tests {
         };
         let formatted = format_name("Very Long File Name With Many Words", None, &style);
         assert!(formatted.len() <= 12);
+    }
+
+    #[test]
+    fn format_name_handles_multibyte_chars_without_panicking() {
+        let style = StyleOptions {
+            length: NameLength::Short,
+            capitalization: Capitalization::Title,
+            separator: Separator::Space,
+            keep_extension: true,
+            strip_colons: true,
+        };
+        let formatted = format_name("가나다라마바사-테스트🙂파일", Some("txt"), &style);
+        assert!(formatted.ends_with(".txt"));
+        assert!(formatted.chars().count() <= 16);
     }
 
     #[test]

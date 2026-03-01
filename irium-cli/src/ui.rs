@@ -143,46 +143,29 @@ fn draw_scope(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 fn draw_scope_left(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     let focused = app.focus == FocusPane::ScopeMain
         && matches!(app.scope_tab, ScopeTab::Files | ScopeTab::Select);
-    frame.render_widget(focus_block("Files / Select", focused), area);
+    frame.render_widget(focus_block("Select", focused), area);
     let inner = inner_rect(area);
-    if inner.height < 3 {
+    if inner.height < 6 {
         return;
     }
 
-    let layout = Layout::default()
+    let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(inner);
 
-    let left_tabs = [ScopeTab::Files, ScopeTab::Select];
-    let selected = if app.scope_left_tab == ScopeTab::Select {
-        1
-    } else {
-        0
-    };
-    frame.render_widget(
-        Tabs::new(
-            left_tabs
-                .iter()
-                .map(|tab| Line::from(tab.title()))
-                .collect::<Vec<_>>(),
-        )
-        .style(Theme::muted_text())
-        .highlight_style(Theme::accent_text())
-        .select(selected)
-        .divider("  "),
-        layout[0],
-    );
-    app.ui_map
-        .scope_tabs
-        .extend(segment_tabs(layout[0], left_tabs.as_slice()));
+    if sections[0].height > 0 && sections[0].width > 0 {
+        draw_scope_select(frame, app, sections[0]);
+    }
 
-    match app.scope_left_tab {
-        ScopeTab::Files => draw_scope_files(frame, app, layout[1]),
-        ScopeTab::Select => draw_scope_select(frame, app, layout[1]),
-        ScopeTab::Constraint | ScopeTab::Preset | ScopeTab::Marketplace => {
-            draw_scope_files(frame, app, layout[1]);
-        }
+    let files_focus = app.focus == FocusPane::ScopeMain && app.scope_tab == ScopeTab::Files;
+    frame.render_widget(
+        focus_block("Files", files_focus),
+        sections[1],
+    );
+    let files_inner = inner_rect(sections[1]);
+    if files_inner.height > 0 && files_inner.width > 0 {
+        draw_scope_files(frame, app, files_inner);
     }
 }
 
@@ -192,7 +175,7 @@ fn draw_scope_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             app.scope_tab,
             ScopeTab::Constraint | ScopeTab::Preset | ScopeTab::Marketplace
         );
-    frame.render_widget(focus_block("Constraint / Preset", focused), area);
+    frame.render_widget(focus_block("Options", focused), area);
     let inner = inner_rect(area);
     if inner.height < 3 {
         return;

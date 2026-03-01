@@ -53,7 +53,7 @@ impl ScopeTab {
     pub fn title(self) -> &'static str {
         match self {
             ScopeTab::Files => "Files",
-            ScopeTab::Select => "Select",
+            ScopeTab::Select => "Category",
             ScopeTab::Constraint => "Constraint",
             ScopeTab::Preset => "Preset",
             ScopeTab::Marketplace => "Marketplace",

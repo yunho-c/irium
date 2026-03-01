@@ -26,7 +26,7 @@ The app scans the current working directory and opens a three-stage TUI:
 
 ### Scope
 
-- `t`: next scope tab (`Files`, `Select`, `Constraint`, `Preset`, `Marketplace`)
+- `t`: next scope tab (`Files`, `Category`, `Constraint`, `Preset`, `Marketplace`)
 - `T`: previous scope tab
 - `Up` / `Down`: move cursor
 - `Space`: toggle select/filter item
@@ -36,7 +36,7 @@ The app scans the current working directory and opens a three-stage TUI:
 - `Ctrl+Left`: collapse subtree recursively (Files tab)
 - `Ctrl+1..9`: save preset slot
 - `1..9`: load preset slot (Preset tab)
-- `n`: new custom category input (Select tab)
+- `n`: new custom category input (Category tab)
 
 ### Naming
 
