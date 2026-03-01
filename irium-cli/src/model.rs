@@ -19,9 +19,9 @@ impl Stage {
 
     pub fn title(self) -> &'static str {
         match self {
-            Stage::Scope => "1) Scope",
-            Stage::Naming => "2) Naming",
-            Stage::Apply => "3) Apply",
+            Stage::Scope => "Scope",
+            Stage::Naming => "Naming",
+            Stage::Apply => "Apply",
         }
     }
 

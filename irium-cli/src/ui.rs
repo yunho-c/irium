@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs, Wrap},
 };
@@ -71,6 +71,26 @@ fn draw_minimum_size_warning(frame: &mut Frame<'_>, area: Rect) {
 }
 
 fn draw_stage_tabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
+    let title_width = area.width.min(30);
+    let layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(title_width), Constraint::Min(0)])
+        .split(area);
+    let title_line = Line::from(vec![
+        Span::styled(
+            "IRIUM",
+            Style::default()
+                .fg(Theme::text())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(": intelligent renamer"),
+    ]);
+    frame.render_widget(Paragraph::new(title_line), layout[0]);
+
+    if layout[1].width == 0 {
+        return;
+    }
+
     let titles: Vec<Line<'_>> = Stage::ALL
         .iter()
         .map(|stage| Line::from(Span::styled(stage.title(), Theme::muted_text())))
@@ -85,9 +105,9 @@ fn draw_stage_tabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .highlight_style(Theme::accent_text())
         .select(selected)
         .divider(" | ");
-    frame.render_widget(tabs, area);
+    frame.render_widget(tabs, layout[1]);
 
-    for (idx, rect) in segment_rects(area, Stage::ALL.len())
+    for (idx, rect) in segment_rects(layout[1], Stage::ALL.len())
         .into_iter()
         .enumerate()
     {
@@ -305,7 +325,8 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .take(list_height)
     {
         let node = &app.tree.nodes[row.node_id];
-        let indent = "  ".repeat(row.depth as usize);
+        let mut indent = "  ".repeat(row.depth as usize);
+        let _ = indent.pop();
         let icon = node_icon(node);
         let mark = if app.node_selected_for_display(row.node_id) {
             "[x]"
