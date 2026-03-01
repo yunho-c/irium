@@ -712,7 +712,7 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
     if app.rename_rows.is_empty() {
         frame.render_widget(
-            Paragraph::new("No files selected/matched yet. Use Scope > Files or filters.")
+            Paragraph::new("No files selected yet. Use Scope > Files.")
                 .style(Theme::muted_text())
                 .wrap(Wrap { trim: true }),
             inner,

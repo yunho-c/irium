@@ -928,9 +928,6 @@ impl AppState {
         for file in &all_files {
             let include = self.matches_filters(file);
             self.filter_cache.insert(file.path.clone(), include);
-            if include {
-                include_paths.insert(file.path.clone());
-            }
         }
 
         let mut old_rows = HashMap::new();
@@ -1309,6 +1306,34 @@ mod tests {
 
         assert!(app.selected_extensions.contains("pdf"));
         assert_eq!(app.time_constraint, TimeConstraint::Week);
+    }
+
+    #[test]
+    fn rename_rows_require_scope_selection_even_with_matching_filters() {
+        let unique = format!(
+            "irium-rename-selection-source-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&root).expect("create root");
+        let pdf_file = root.join("doc.pdf");
+        std::fs::write(&pdf_file, b"x").expect("write pdf");
+
+        let mut app = AppState::new(root.clone());
+        app.selected_extensions.insert("pdf".to_string());
+        app.sync_rename_rows();
+        assert!(app.rename_rows.is_empty());
+
+        app.selected_by_tree.insert(pdf_file.clone());
+        app.sync_rename_rows();
+        assert_eq!(app.rename_rows.len(), 1);
+        assert_eq!(app.rename_rows[0].path, pdf_file);
+
+        std::fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]
