@@ -1,21 +1,34 @@
-use std::{io, time::Duration};
+mod actions;
+mod app;
+mod fs_scan;
+mod input;
+mod mock;
+mod model;
+mod theme;
+mod ui;
+
+use std::{io, panic, time::Duration};
 
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{
-    Terminal,
-    prelude::{CrosstermBackend, Rect},
-    widgets::{Block, Borders, Paragraph},
+use ratatui::{Terminal, prelude::CrosstermBackend};
+
+use crate::{
+    actions::{Action, reduce},
+    input::map_event,
+    model::AppState,
 };
 
 type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 
 fn main() -> io::Result<()> {
     let mut terminal = setup_terminal()?;
-    let result = run_app(&mut terminal);
+    install_panic_hook();
+    let mut app = AppState::new(std::env::current_dir()?);
+    let result = run_app(&mut terminal, &mut app);
     restore_terminal(&mut terminal)?;
     result
 }
@@ -23,43 +36,45 @@ fn main() -> io::Result<()> {
 fn setup_terminal() -> io::Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     Terminal::new(CrosstermBackend::new(stdout))
 }
 
 fn restore_terminal(terminal: &mut Tui) -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), DisableMouseCapture, LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     Ok(())
 }
 
-fn run_app(terminal: &mut Tui) -> io::Result<()> {
-    loop {
-        terminal.draw(|frame| {
-            let area = centered_rect(frame.area(), 60, 30);
-            let panel = Block::default().title(" Irium CLI ").borders(Borders::ALL);
-            let content = Paragraph::new("irm is running.\nPress q or Esc to quit.")
-                .block(panel)
-                .centered();
-
-            frame.render_widget(content, area);
-        })?;
-
-        if event::poll(Duration::from_millis(250))?
-            && let Event::Key(key) = event::read()?
-            && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
-        {
-            return Ok(());
-        }
-    }
+fn install_panic_hook() {
+    let default_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |panic_info| {
+        let _ = disable_raw_mode();
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, DisableMouseCapture, LeaveAlternateScreen);
+        default_hook(panic_info);
+    }));
 }
 
-fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
-    let width = area.width.saturating_mul(width_percent) / 100;
-    let height = area.height.saturating_mul(height_percent) / 100;
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
+fn run_app(terminal: &mut Tui, app: &mut AppState) -> io::Result<()> {
+    let tick_rate = Duration::from_millis(120);
+    while !app.should_quit {
+        terminal.draw(|frame| ui::draw(frame, app))?;
 
-    Rect::new(x, y, width.max(1), height.max(1))
+        if event::poll(tick_rate)? {
+            let event = event::read()?;
+            let actions = map_event(app, event);
+            for action in actions {
+                reduce(app, action);
+                if app.should_quit {
+                    break;
+                }
+            }
+        } else {
+            reduce(app, Action::Tick);
+        }
+    }
+
+    Ok(())
 }
