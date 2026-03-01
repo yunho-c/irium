@@ -160,7 +160,26 @@ fn draw_scope_left(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     }
 
     let files_focus = app.focus == FocusPane::ScopeFiles;
-    frame.render_widget(focus_block("Files", files_focus), sections[1]);
+    let files_title = if app.show_selected_categories_only {
+        "Files (filtered)"
+    } else {
+        "Files"
+    };
+    frame.render_widget(focus_block(files_title, files_focus), sections[1]);
+    if sections[1].width > 2 {
+        let icon_area = Rect::new(
+            sections[1].x + sections[1].width.saturating_sub(2),
+            sections[1].y,
+            1,
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(Span::styled("\u{f013}", Theme::accent_text())),
+            icon_area,
+        );
+        app.click_regions
+            .register(icon_area, ClickTarget::ScopeFilesSettingsButton);
+    }
     let files_inner = inner_rect(sections[1]);
     if files_inner.height > 0 && files_inner.width > 0 {
         draw_scope_files(frame, app, files_inner);
@@ -229,29 +248,26 @@ fn draw_scope_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    if area.height < 2 {
+    if area.height < 1 {
         return;
     }
 
-    let popup_height = if app.files_settings_open { 3 } else { 0 };
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(popup_height),
-            Constraint::Min(1),
-        ])
-        .split(area);
-
-    draw_files_topbar(frame, app, sections[0]);
-
-    if app.files_settings_open {
-        draw_files_settings_popup(frame, app, sections[1]);
-    }
+    let list_area = if app.files_settings_open {
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(area);
+        draw_files_settings_popup(frame, app, sections[0]);
+        sections[1]
+    } else {
+        area
+    };
 
     let visible = app.scope_files_rows();
     if visible.is_empty() {
-        let text = if app.show_selected_categories_only && !app.selected_extensions.is_empty() {
+        let text = if app.show_selected_categories_only && app.selected_extensions.is_empty() {
+            "No categories selected".to_string()
+        } else if app.show_selected_categories_only {
             "No files match currently selected categories".to_string()
         } else {
             app.scan_error
@@ -263,14 +279,13 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             Paragraph::new(text)
                 .style(Theme::muted_text())
                 .wrap(Wrap { trim: true }),
-            sections[2],
+            list_area,
         );
         app.tree.scroll = 0;
         app.tree.cursor = 0;
         return;
     }
 
-    let list_area = sections[2];
     let list_height = list_area.height.saturating_sub(1) as usize;
     if app.tree.cursor < app.tree.scroll {
         app.tree.scroll = app.tree.cursor;
@@ -324,36 +339,6 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     }
 
     frame.render_widget(List::new(items), list_area);
-}
-
-fn draw_files_topbar(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let icon = "\u{f013}";
-    let mut spans = Vec::new();
-    let label = if app.show_selected_categories_only {
-        "Filtered by selected categories"
-    } else {
-        "All categories"
-    };
-    spans.push(Span::styled(label, Theme::muted_text()));
-
-    if area.width > 4 {
-        let pad_len = area.width.saturating_sub(2) as usize;
-        let text_width = label.chars().count().min(pad_len);
-        let remaining = pad_len.saturating_sub(text_width);
-        spans.push(Span::raw(" ".repeat(remaining)));
-    }
-
-    spans.push(Span::styled(icon, Theme::accent_text()));
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
-
-    if area.width > 0 {
-        let button_width = area.width.min(3);
-        let button_x = area.x + area.width.saturating_sub(button_width);
-        app.click_regions.register(
-            Rect::new(button_x, area.y, button_width, 1),
-            ClickTarget::ScopeFilesSettingsButton,
-        );
-    }
 }
 
 fn draw_files_settings_popup(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {

@@ -231,12 +231,19 @@ impl AppState {
     }
 
     pub fn scope_files_rows(&self) -> Vec<VisibleNode> {
+        if self.show_selected_categories_only && self.selected_extensions.is_empty() {
+            return Vec::new();
+        }
+
         let mut rows = self.tree.visible_nodes();
-        if !self.show_selected_categories_only || self.selected_extensions.is_empty() {
+        if !self.show_selected_categories_only {
             return rows;
         }
 
-        rows.retain(|row| self.node_matches_selected_categories(row.node_id));
+        let mut directory_match_cache: HashMap<PathBuf, bool> = HashMap::new();
+        rows.retain(|row| {
+            self.node_matches_selected_categories(row.node_id, &mut directory_match_cache)
+        });
         rows
     }
 
@@ -280,10 +287,25 @@ impl AppState {
         );
     }
 
-    fn node_matches_selected_categories(&self, node_id: usize) -> bool {
+    fn node_matches_selected_categories(
+        &self,
+        node_id: usize,
+        directory_match_cache: &mut HashMap<PathBuf, bool>,
+    ) -> bool {
         let node = &self.tree.nodes[node_id];
         if node.is_dir {
-            return true;
+            if let Some(cached) = directory_match_cache.get(&node.path) {
+                return *cached;
+            }
+
+            let has_matching_descendant = fs_scan::collect_files(&node.path, self.show_hidden, 2500)
+                .into_iter()
+                .any(|entry| {
+                    let ext = entry.extension.unwrap_or_default();
+                    self.selected_extensions.contains(&ext)
+                });
+            directory_match_cache.insert(node.path.clone(), has_matching_descendant);
+            return has_matching_descendant;
         }
 
         let ext = node
@@ -1330,6 +1352,50 @@ mod tests {
 
         assert!(app.selected_by_tree.contains(&pdf_file));
         assert!(!app.selected_by_tree.contains(&audio_file));
+
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn scope_files_rows_empty_when_filtered_and_no_categories_selected() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = AppState::new(cwd);
+        app.show_selected_categories_only = true;
+        app.selected_extensions.clear();
+
+        assert!(app.scope_files_rows().is_empty());
+    }
+
+    #[test]
+    fn scope_files_rows_hides_folders_without_matching_descendants_when_filtered() {
+        let unique = format!(
+            "irium-folder-filter-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        let pdf_dir = root.join("pdfs");
+        let audio_dir = root.join("audio");
+        std::fs::create_dir_all(&pdf_dir).expect("create pdf dir");
+        std::fs::create_dir_all(&audio_dir).expect("create audio dir");
+        std::fs::write(pdf_dir.join("a.pdf"), b"x").expect("write pdf file");
+        std::fs::write(audio_dir.join("a.mp3"), b"y").expect("write audio file");
+
+        let mut app = AppState::new(root.clone());
+        app.show_selected_categories_only = true;
+        app.selected_extensions.insert("pdf".to_string());
+        app.normalize_scope_files_cursor();
+
+        let visible_names: Vec<String> = app
+            .scope_files_rows()
+            .into_iter()
+            .map(|row| app.tree.nodes[row.node_id].name.clone())
+            .collect();
+        assert!(visible_names.contains(&"pdfs".to_string()));
+        assert!(!visible_names.contains(&"audio".to_string()));
 
         std::fs::remove_dir_all(root).expect("cleanup");
     }
