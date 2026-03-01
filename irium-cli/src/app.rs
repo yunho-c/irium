@@ -12,7 +12,7 @@ use crate::{
     model::{
         AppState, CategoryFilter, FileNode, FileTree, FocusPane, InputMode, MarketplacePreset,
         NamingTab, PresetState, RenameRow, ScopeTab, SessionUndoEntry, SizeConstraint, Stage,
-        StyleOptions, TimeConstraint, Toast, ToastLevel,
+        StyleOptions, TimeConstraint, Toast, ToastLevel, VisibleNode,
     },
 };
 
@@ -32,6 +32,8 @@ impl AppState {
             should_quit: false,
             show_help: false,
             show_hidden: false,
+            files_settings_open: false,
+            show_selected_categories_only: false,
             tree,
             scan_error: None,
             category_filters: mock::default_category_filters(),
@@ -225,7 +227,72 @@ impl AppState {
         if let Err(error) = self.ensure_children_loaded(self.tree.root) {
             self.scan_error = Some(error);
         }
-        self.tree.fix_cursor();
+        self.normalize_scope_files_cursor();
+    }
+
+    pub fn scope_files_rows(&self) -> Vec<VisibleNode> {
+        let mut rows = self.tree.visible_nodes();
+        if !self.show_selected_categories_only || self.selected_extensions.is_empty() {
+            return rows;
+        }
+
+        rows.retain(|row| self.node_matches_selected_categories(row.node_id));
+        rows
+    }
+
+    pub fn scope_files_rows_len(&self) -> usize {
+        self.scope_files_rows().len()
+    }
+
+    pub fn current_scope_file_node_id(&self) -> Option<usize> {
+        let rows = self.scope_files_rows();
+        if rows.is_empty() {
+            return None;
+        }
+        Some(rows[self.tree.cursor.min(rows.len() - 1)].node_id)
+    }
+
+    pub fn normalize_scope_files_cursor(&mut self) {
+        let len = self.scope_files_rows_len();
+        if len == 0 {
+            self.tree.cursor = 0;
+            self.tree.scroll = 0;
+            return;
+        }
+        self.tree.cursor = self.tree.cursor.min(len - 1);
+        self.tree.scroll = self.tree.scroll.min(self.tree.cursor);
+    }
+
+    pub fn toggle_files_settings_popup(&mut self) {
+        self.files_settings_open = !self.files_settings_open;
+    }
+
+    pub fn toggle_show_selected_categories_only(&mut self) {
+        self.show_selected_categories_only = !self.show_selected_categories_only;
+        self.normalize_scope_files_cursor();
+        self.push_toast(
+            ToastLevel::Info,
+            if self.show_selected_categories_only {
+                "Files view: showing selected categories only"
+            } else {
+                "Files view: showing all categories"
+            },
+        );
+    }
+
+    fn node_matches_selected_categories(&self, node_id: usize) -> bool {
+        let node = &self.tree.nodes[node_id];
+        if node.is_dir {
+            return true;
+        }
+
+        let ext = node
+            .path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_lowercase())
+            .unwrap_or_default();
+        self.selected_extensions.contains(&ext)
     }
 
     pub fn ensure_children_loaded(&mut self, node_id: usize) -> Result<(), String> {
@@ -283,7 +350,7 @@ impl AppState {
         match self.scope_tab {
             ScopeTab::Files => {
                 self.tree.cursor = self.tree.cursor.saturating_sub(1);
-                self.tree.fix_cursor();
+                self.normalize_scope_files_cursor();
             }
             ScopeTab::Select => {
                 self.select_cursor = self.select_cursor.saturating_sub(1);
@@ -303,10 +370,10 @@ impl AppState {
     fn move_scope_down(&mut self) {
         match self.scope_tab {
             ScopeTab::Files => {
-                let count = self.tree.visible_nodes().len();
+                let count = self.scope_files_rows_len();
                 if count > 0 {
                     self.tree.cursor = (self.tree.cursor + 1).min(count - 1);
-                    self.tree.fix_cursor();
+                    self.normalize_scope_files_cursor();
                 }
             }
             ScopeTab::Select => {
@@ -406,7 +473,7 @@ impl AppState {
             return;
         }
 
-        let Some(node_id) = self.tree.current_node_id() else {
+        let Some(node_id) = self.current_scope_file_node_id() else {
             return;
         };
 
@@ -430,23 +497,23 @@ impl AppState {
             return;
         }
 
-        let Some(node_id) = self.tree.current_node_id() else {
+        let Some(node_id) = self.current_scope_file_node_id() else {
             return;
         };
 
         if self.tree.nodes[node_id].is_dir && self.tree.nodes[node_id].expanded {
             self.tree.nodes[node_id].expanded = false;
-            self.tree.fix_cursor();
+            self.normalize_scope_files_cursor();
             return;
         }
 
         if let Some(parent) = self.tree.nodes[node_id].parent {
-            let visible = self.tree.visible_nodes();
+            let visible = self.scope_files_rows();
             if let Some(index) = visible.iter().position(|row| row.node_id == parent) {
                 self.tree.cursor = index;
             }
         }
-        self.tree.fix_cursor();
+        self.normalize_scope_files_cursor();
     }
 
     pub fn expand_all_current(&mut self) {
@@ -454,7 +521,7 @@ impl AppState {
             return;
         }
 
-        let Some(node_id) = self.tree.current_node_id() else {
+        let Some(node_id) = self.current_scope_file_node_id() else {
             return;
         };
 
@@ -464,7 +531,7 @@ impl AppState {
                 format!("Expanded partially (some folders unreadable): {error}"),
             );
         }
-        self.tree.fix_cursor();
+        self.normalize_scope_files_cursor();
     }
 
     fn expand_recursive(&mut self, node_id: usize) -> Result<(), String> {
@@ -488,12 +555,12 @@ impl AppState {
             return;
         }
 
-        let Some(node_id) = self.tree.current_node_id() else {
+        let Some(node_id) = self.current_scope_file_node_id() else {
             return;
         };
 
         self.collapse_recursive(node_id);
-        self.tree.fix_cursor();
+        self.normalize_scope_files_cursor();
     }
 
     fn collapse_recursive(&mut self, node_id: usize) {
@@ -505,7 +572,7 @@ impl AppState {
     }
 
     pub fn toggle_scope_file_selection(&mut self) {
-        let Some(node_id) = self.tree.current_node_id() else {
+        let Some(node_id) = self.current_scope_file_node_id() else {
             return;
         };
 

@@ -410,24 +410,6 @@ impl FileTree {
         }
     }
 
-    pub fn current_node_id(&self) -> Option<usize> {
-        let visible = self.visible_nodes();
-        if visible.is_empty() {
-            return None;
-        }
-        Some(visible[self.cursor.min(visible.len() - 1)].node_id)
-    }
-
-    pub fn fix_cursor(&mut self) {
-        let len = self.visible_nodes().len();
-        if len == 0 {
-            self.cursor = 0;
-            self.scroll = 0;
-            return;
-        }
-        self.cursor = self.cursor.min(len - 1);
-        self.scroll = self.scroll.min(self.cursor);
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -436,6 +418,8 @@ pub enum ClickTarget {
     ScopeTab(ScopeTab),
     NamingTab(NamingTab),
     ScopeFileRow(usize),
+    ScopeFilesSettingsButton,
+    ScopeFilesSettingShowSelectedCategoriesOnly,
     ScopeCategoryRow(usize),
     ScopeConstraintRow(usize),
     ScopePresetRow(usize),
@@ -464,6 +448,8 @@ pub struct AppState {
     pub should_quit: bool,
     pub show_help: bool,
     pub show_hidden: bool,
+    pub files_settings_open: bool,
+    pub show_selected_categories_only: bool,
 
     pub tree: FileTree,
     pub scan_error: Option<String>,

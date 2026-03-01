@@ -241,8 +241,18 @@ fn handle_mouse_click(app: &mut AppState, col: u16, row: u16) {
         ClickTarget::ScopeFileRow(index) => {
             app.set_scope_tab(ScopeTab::Files);
             app.tree.cursor = index;
-            app.tree.fix_cursor();
+            app.normalize_scope_files_cursor();
             app.toggle_scope_file_selection();
+        }
+        ClickTarget::ScopeFilesSettingsButton => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.set_focus(FocusPane::ScopeFiles);
+            app.toggle_files_settings_popup();
+        }
+        ClickTarget::ScopeFilesSettingShowSelectedCategoriesOnly => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.set_focus(FocusPane::ScopeFiles);
+            app.toggle_show_selected_categories_only();
         }
         ClickTarget::ScopeCategoryRow(index) => {
             app.set_scope_tab(ScopeTab::Select);
@@ -316,10 +326,11 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
         ClickTarget::StageTab(_) | ClickTarget::ScopeTab(_) | ClickTarget::NamingTab(_) => {}
         ClickTarget::ScopeFileRow(_) => {
             app.set_scope_tab(ScopeTab::Files);
-            app.tree.fix_cursor();
-            app.tree.cursor = scroll_index(app.tree.cursor, app.tree.visible_nodes().len(), delta);
-            app.tree.fix_cursor();
+            app.normalize_scope_files_cursor();
+            app.tree.cursor = scroll_index(app.tree.cursor, app.scope_files_rows_len(), delta);
+            app.normalize_scope_files_cursor();
         }
+        ClickTarget::ScopeFilesSettingsButton | ClickTarget::ScopeFilesSettingShowSelectedCategoriesOnly => {}
         ClickTarget::ScopeCategoryRow(_) => {
             app.set_scope_tab(ScopeTab::Select);
             app.select_cursor = scroll_index(app.select_cursor, app.category_filters.len(), delta);
@@ -345,8 +356,8 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
                     app.select_cursor = scroll_index(app.select_cursor, app.category_filters.len(), delta);
                 }
                 FocusPane::ScopeFiles => {
-                    app.tree.cursor = scroll_index(app.tree.cursor, app.tree.visible_nodes().len(), delta);
-                    app.tree.fix_cursor();
+                    app.tree.cursor = scroll_index(app.tree.cursor, app.scope_files_rows_len(), delta);
+                    app.normalize_scope_files_cursor();
                 }
                 FocusPane::ScopeOptions => {
                     let max_len = match app.scope_right_tab {

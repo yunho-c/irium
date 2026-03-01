@@ -229,23 +229,49 @@ fn draw_scope_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let visible = app.tree.visible_nodes();
+    if area.height < 2 {
+        return;
+    }
+
+    let popup_height = if app.files_settings_open { 3 } else { 0 };
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(popup_height),
+            Constraint::Min(1),
+        ])
+        .split(area);
+
+    draw_files_topbar(frame, app, sections[0]);
+
+    if app.files_settings_open {
+        draw_files_settings_popup(frame, app, sections[1]);
+    }
+
+    let visible = app.scope_files_rows();
     if visible.is_empty() {
-        let text = app
-            .scan_error
-            .as_ref()
-            .map(|error| format!("Could not read directory tree: {error}"))
-            .unwrap_or_else(|| "No files found in current directory".to_string());
+        let text = if app.show_selected_categories_only && !app.selected_extensions.is_empty() {
+            "No files match currently selected categories".to_string()
+        } else {
+            app.scan_error
+                .as_ref()
+                .map(|error| format!("Could not read directory tree: {error}"))
+                .unwrap_or_else(|| "No files found in current directory".to_string())
+        };
         frame.render_widget(
             Paragraph::new(text)
                 .style(Theme::muted_text())
                 .wrap(Wrap { trim: true }),
-            area,
+            sections[2],
         );
+        app.tree.scroll = 0;
+        app.tree.cursor = 0;
         return;
     }
 
-    let list_height = area.height.saturating_sub(1) as usize;
+    let list_area = sections[2];
+    let list_height = list_area.height.saturating_sub(1) as usize;
     if app.tree.cursor < app.tree.scroll {
         app.tree.scroll = app.tree.cursor;
     } else if app.tree.cursor >= app.tree.scroll + list_height && list_height > 0 {
@@ -290,14 +316,65 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         };
         items.push(ListItem::new(Line::from(line)).style(style));
 
-        let y = area.y + (idx - app.tree.scroll) as u16;
+        let y = list_area.y + (idx - app.tree.scroll) as u16;
         app.click_regions.register(
-            Rect::new(area.x, y, area.width, 1),
+            Rect::new(list_area.x, y, list_area.width, 1),
             ClickTarget::ScopeFileRow(idx),
         );
     }
 
-    frame.render_widget(List::new(items), area);
+    frame.render_widget(List::new(items), list_area);
+}
+
+fn draw_files_topbar(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
+    let icon = "\u{f013}";
+    let mut spans = Vec::new();
+    let label = if app.show_selected_categories_only {
+        "Filtered by selected categories"
+    } else {
+        "All categories"
+    };
+    spans.push(Span::styled(label, Theme::muted_text()));
+
+    if area.width > 4 {
+        let pad_len = area.width.saturating_sub(2) as usize;
+        let text_width = label.chars().count().min(pad_len);
+        let remaining = pad_len.saturating_sub(text_width);
+        spans.push(Span::raw(" ".repeat(remaining)));
+    }
+
+    spans.push(Span::styled(icon, Theme::accent_text()));
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+
+    if area.width > 0 {
+        let button_width = area.width.min(3);
+        let button_x = area.x + area.width.saturating_sub(button_width);
+        app.click_regions.register(
+            Rect::new(button_x, area.y, button_width, 1),
+            ClickTarget::ScopeFilesSettingsButton,
+        );
+    }
+}
+
+fn draw_files_settings_popup(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
+    let block = Block::default().borders(Borders::ALL).title(" Settings ");
+    frame.render_widget(block, area);
+    let inner = inner_rect(area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let mark = if app.show_selected_categories_only {
+        "[x]"
+    } else {
+        "[ ]"
+    };
+    let row = format!("{mark} Show selected categories only");
+    frame.render_widget(Paragraph::new(row).style(Theme::panel()), inner);
+    app.click_regions.register(
+        Rect::new(inner.x, inner.y, inner.width, 1),
+        ClickTarget::ScopeFilesSettingShowSelectedCategoriesOnly,
+    );
 }
 
 fn append_name_with_muted_extension(line: &mut Vec<Span<'_>>, node: &crate::model::FileNode) {
