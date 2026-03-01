@@ -23,11 +23,21 @@ pub fn default_category_filters() -> Vec<CategoryFilter> {
         },
         CategoryFilter {
             name: "Archives".to_string(),
-            extensions: vec!["zip".to_string(), "tar".to_string(), "gz".to_string(), "rar".to_string()],
+            extensions: vec![
+                "zip".to_string(),
+                "tar".to_string(),
+                "gz".to_string(),
+                "rar".to_string(),
+            ],
         },
         CategoryFilter {
             name: "Audio".to_string(),
-            extensions: vec!["mp3".to_string(), "wav".to_string(), "m4a".to_string(), "flac".to_string()],
+            extensions: vec![
+                "mp3".to_string(),
+                "wav".to_string(),
+                "m4a".to_string(),
+                "flac".to_string(),
+            ],
         },
         CategoryFilter {
             name: "Presentations".to_string(),
@@ -35,7 +45,12 @@ pub fn default_category_filters() -> Vec<CategoryFilter> {
         },
         CategoryFilter {
             name: "Docs".to_string(),
-            extensions: vec!["doc".to_string(), "docx".to_string(), "txt".to_string(), "md".to_string()],
+            extensions: vec![
+                "doc".to_string(),
+                "docx".to_string(),
+                "txt".to_string(),
+                "md".to_string(),
+            ],
         },
     ]
 }
@@ -51,7 +66,12 @@ pub fn default_marketplace_presets() -> Vec<MarketplacePreset> {
         MarketplacePreset {
             name: "Wallpapers".to_string(),
             description: "Image assets for desktop/mobile".to_string(),
-            extensions: vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string(), "webp".to_string()],
+            extensions: vec![
+                "png".to_string(),
+                "jpg".to_string(),
+                "jpeg".to_string(),
+                "webp".to_string(),
+            ],
             time_constraint: TimeConstraint::Any,
         },
         MarketplacePreset {
@@ -176,7 +196,9 @@ pub fn format_name(base_name: &str, extension: Option<&str>, style: &StyleOption
         out = "file".to_string();
     }
 
-    if style.keep_extension && let Some(ext) = extension {
+    if style.keep_extension
+        && let Some(ext) = extension
+    {
         out.push('.');
         out.push_str(ext);
     }

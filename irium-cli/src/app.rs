@@ -27,6 +27,7 @@ impl AppState {
             scope_right_tab: ScopeTab::Constraint,
             naming_tab: NamingTab::Suggestions,
             focus: FocusPane::ScopeMain,
+            focus_manager: Default::default(),
             mode: InputMode::Normal,
             should_quit: false,
             show_help: false,
@@ -57,24 +58,30 @@ impl AppState {
             override_vocab: Default::default(),
             toasts: vec![Toast {
                 level: ToastLevel::Info,
-                message: "Welcome to irm. Scope files, shape names, and simulate apply.".to_string(),
+                message: "Welcome to irm. Scope files, shape names, and simulate apply."
+                    .to_string(),
                 ttl_ticks: 55,
             }],
             undo_history: Vec::new(),
             apply_cursor: 0,
             history_cursor: 0,
-            ui_map: Default::default(),
+            click_regions: Default::default(),
             ticks: 0,
             help_lines: vec![
                 Line::from("Global: q quit | [ / ] stage | Tab focus | ? help"),
-                Line::from("Files: arrows move | Space select | Left/Right collapse/expand | Ctrl+Right expand all"),
-                Line::from("Naming: e edit override | g then 1-9 assign group | / style command | Enter apply"),
+                Line::from(
+                    "Files: arrows move | Space select | Left/Right collapse/expand | Ctrl+Right expand all",
+                ),
+                Line::from(
+                    "Naming: e edit override | g then 1-9 assign group | / style command | Enter apply",
+                ),
                 Line::from("Apply: Enter submit+exit (simulated) | Ctrl+Enter submit+stay"),
             ],
             selected_by_tree: HashSet::new(),
             filter_cache: HashMap::new(),
         };
 
+        app.sync_focus_manager();
         app.reload_tree();
         app.sync_rename_rows();
         app
@@ -111,22 +118,43 @@ impl AppState {
     }
 
     pub fn next_focus(&mut self) {
-        let focuses = self.stage_focuses();
-        let current = focuses.iter().position(|item| *item == self.focus).unwrap_or(0);
-        self.focus = focuses[(current + 1) % focuses.len()];
+        self.focus_manager.next();
+        if let Some(focus) = self.focus_manager.current() {
+            self.focus = *focus;
+        }
     }
 
     pub fn prev_focus(&mut self) {
-        let focuses = self.stage_focuses();
-        let current = focuses.iter().position(|item| *item == self.focus).unwrap_or(0);
-        self.focus = focuses[(current + focuses.len() - 1) % focuses.len()];
+        self.focus_manager.prev();
+        if let Some(focus) = self.focus_manager.current() {
+            self.focus = *focus;
+        }
     }
 
     pub fn set_stage(&mut self, stage: Stage) {
         self.stage = stage;
-        self.focus = self.stage_focuses()[0];
+        self.sync_focus_manager();
+        self.set_focus(self.stage_focuses()[0]);
         if self.stage == Stage::Naming {
             self.sync_rename_rows();
+        }
+    }
+
+    pub fn set_focus(&mut self, focus: FocusPane) {
+        self.focus = focus;
+        self.focus_manager.set(focus);
+    }
+
+    fn sync_focus_manager(&mut self) {
+        self.focus_manager.clear();
+        self.focus_manager
+            .register_all(self.stage_focuses().iter().copied());
+        self.focus_manager.set(self.focus);
+        if let Some(current) = self.focus_manager.current() {
+            self.focus = *current;
+        } else if let Some(first) = self.stage_focuses().first().copied() {
+            self.focus = first;
+            self.focus_manager.set(first);
         }
     }
 
@@ -243,7 +271,8 @@ impl AppState {
             }
             ScopeTab::Select => {
                 if !self.category_filters.is_empty() {
-                    self.select_cursor = (self.select_cursor + 1).min(self.category_filters.len() - 1);
+                    self.select_cursor =
+                        (self.select_cursor + 1).min(self.category_filters.len() - 1);
                 }
             }
             ScopeTab::Constraint => {
@@ -324,7 +353,8 @@ impl AppState {
             }
             FocusPane::ApplyHistory => {
                 if !self.undo_history.is_empty() {
-                    self.history_cursor = (self.history_cursor + 1).min(self.undo_history.len() - 1);
+                    self.history_cursor =
+                        (self.history_cursor + 1).min(self.undo_history.len() - 1);
                 }
             }
             _ => {}
@@ -345,7 +375,10 @@ impl AppState {
         }
 
         if let Err(error) = self.ensure_children_loaded(node_id) {
-            self.push_toast(ToastLevel::Error, format!("Could not expand folder: {error}"));
+            self.push_toast(
+                ToastLevel::Error,
+                format!("Could not expand folder: {error}"),
+            );
             return;
         }
 
@@ -438,7 +471,10 @@ impl AppState {
 
         let selected = !self.tree.nodes[node_id].selected;
         if let Err(error) = self.set_node_selected(node_id, selected) {
-            self.push_toast(ToastLevel::Error, format!("Selection update failed: {error}"));
+            self.push_toast(
+                ToastLevel::Error,
+                format!("Selection update failed: {error}"),
+            );
         }
         self.sync_rename_rows();
     }
@@ -546,7 +582,8 @@ impl AppState {
             return;
         }
 
-        self.category_filters.push(CategoryFilter { name, extensions });
+        self.category_filters
+            .push(CategoryFilter { name, extensions });
         self.select_cursor = self.category_filters.len().saturating_sub(1);
         self.new_category_input.clear();
         self.mode = InputMode::Normal;
@@ -625,7 +662,9 @@ impl AppState {
         let fallback_ext = if file_name == stem {
             None
         } else {
-            file_name.rsplit_once('.').map(|(_, ext)| ext.to_lowercase())
+            file_name
+                .rsplit_once('.')
+                .map(|(_, ext)| ext.to_lowercase())
         };
         (stem, ext.or(fallback_ext))
     }
@@ -699,7 +738,9 @@ impl AppState {
         if let Some(override_name) = override_name {
             let trimmed = override_name.trim();
             if !trimmed.is_empty() {
-                if self.style.keep_extension && let Some(ext) = ext {
+                if self.style.keep_extension
+                    && let Some(ext) = ext
+                {
                     let suffix = format!(".{ext}");
                     if !trimmed.to_lowercase().ends_with(&suffix) {
                         return format!("{trimmed}{suffix}");
@@ -907,7 +948,9 @@ impl AppState {
             }
         }
 
-        if changed == 0 && let Some(row) = self.rename_rows.get_mut(self.rename_cursor) {
+        if changed == 0
+            && let Some(row) = self.rename_rows.get_mut(self.rename_cursor)
+        {
             row.group_id = group_id;
             changed = 1;
         }
@@ -920,7 +963,8 @@ impl AppState {
     }
 
     pub fn submit_simulated(&mut self, stay: bool) {
-        let selected: Vec<&RenameRow> = self.rename_rows.iter().filter(|row| row.selected).collect();
+        let selected: Vec<&RenameRow> =
+            self.rename_rows.iter().filter(|row| row.selected).collect();
         if selected.is_empty() {
             self.push_toast(ToastLevel::Warning, "No selected rows to apply");
             return;
@@ -934,8 +978,14 @@ impl AppState {
         let entry = SessionUndoEntry {
             timestamp,
             affected_paths: selected.iter().map(|row| row.path.clone()).collect(),
-            previous_names: selected.iter().map(|row| row.current_name.clone()).collect(),
-            simulated_new_names: selected.iter().map(|row| row.proposed_name.clone()).collect(),
+            previous_names: selected
+                .iter()
+                .map(|row| row.current_name.clone())
+                .collect(),
+            simulated_new_names: selected
+                .iter()
+                .map(|row| row.proposed_name.clone())
+                .collect(),
         };
 
         self.undo_history.insert(0, entry);

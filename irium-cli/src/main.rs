@@ -42,7 +42,11 @@ fn setup_terminal() -> io::Result<Tui> {
 
 fn restore_terminal(terminal: &mut Tui) -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), DisableMouseCapture, LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     Ok(())
 }

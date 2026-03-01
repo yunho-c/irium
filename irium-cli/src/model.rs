@@ -1,11 +1,13 @@
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
+    hash::Hash,
     path::PathBuf,
 };
 
-use ratatui::{layout::Rect, text::Line};
+use ratatui::text::Line;
+use ratatui_interact::{state::FocusManager, traits::ClickRegionRegistry};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Stage {
     Scope,
     Naming,
@@ -40,7 +42,7 @@ impl Stage {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScopeTab {
     Files,
     Select,
@@ -81,7 +83,7 @@ impl ScopeTab {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NamingTab {
     Suggestions,
     Style,
@@ -105,7 +107,7 @@ impl NamingTab {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FocusPane {
     ScopeMain,
     NamingTable,
@@ -426,45 +428,23 @@ impl FileTree {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct RowHit {
-    pub rect: Rect,
-    pub index: usize,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct TabHit<T: Copy> {
-    pub rect: Rect,
-    pub value: T,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct UiMap {
-    pub scope_main: Rect,
-    pub naming_table: Rect,
-    pub naming_right: Rect,
-    pub naming_command: Rect,
-    pub apply_review: Rect,
-    pub apply_history: Rect,
-    pub stage_tabs: Vec<TabHit<Stage>>,
-    pub scope_tabs: Vec<TabHit<ScopeTab>>,
-    pub naming_tabs: Vec<TabHit<NamingTab>>,
-    pub file_rows: Vec<RowHit>,
-    pub select_rows: Vec<RowHit>,
-    pub constraint_rows: Vec<RowHit>,
-    pub preset_rows: Vec<RowHit>,
-    pub marketplace_rows: Vec<RowHit>,
-    pub rename_rows: Vec<RowHit>,
-    pub suggestion_rows: Vec<RowHit>,
-    pub style_rows: Vec<RowHit>,
-    pub apply_rows: Vec<RowHit>,
-    pub history_rows: Vec<RowHit>,
-}
-
-impl<T: Copy> TabHit<T> {
-    pub fn new(rect: Rect, value: T) -> Self {
-        Self { rect, value }
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ClickTarget {
+    StageTab(Stage),
+    ScopeTab(ScopeTab),
+    NamingTab(NamingTab),
+    ScopeFileRow(usize),
+    ScopeCategoryRow(usize),
+    ScopeConstraintRow(usize),
+    ScopePresetRow(usize),
+    ScopeMarketplaceRow(usize),
+    NamingPane(FocusPane),
+    NamingRow(usize),
+    NamingSuggestion(usize),
+    NamingStyleRow(usize),
+    ApplyPane(FocusPane),
+    ApplyRow(usize),
+    ApplyHistoryRow(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -476,6 +456,7 @@ pub struct AppState {
     pub scope_right_tab: ScopeTab,
     pub naming_tab: NamingTab,
     pub focus: FocusPane,
+    pub focus_manager: FocusManager<FocusPane>,
     pub mode: InputMode,
     pub should_quit: bool,
     pub show_help: bool,
@@ -519,7 +500,7 @@ pub struct AppState {
     pub apply_cursor: usize,
     pub history_cursor: usize,
 
-    pub ui_map: UiMap,
+    pub click_regions: ClickRegionRegistry<ClickTarget>,
     pub ticks: u64,
     pub help_lines: Vec<Line<'static>>,
 

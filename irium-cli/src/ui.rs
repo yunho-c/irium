@@ -8,14 +8,14 @@ use ratatui::{
 
 use crate::{
     model::{
-        AppState, Capitalization, FocusPane, InputMode, NameLength, NamingTab, RowHit, ScopeTab,
-        Separator, Stage, TabHit, ToastLevel, UiMap,
+        AppState, Capitalization, ClickTarget, FocusPane, InputMode, NameLength, NamingTab,
+        ScopeTab, Separator, Stage, ToastLevel,
     },
     theme::Theme,
 };
 
 pub fn draw(frame: &mut Frame<'_>, app: &mut AppState) {
-    app.ui_map = UiMap::default();
+    app.click_regions.clear();
 
     let area = frame.area();
     frame.render_widget(Block::default().style(Theme::base()), area);
@@ -87,14 +87,18 @@ fn draw_stage_tabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .divider(" | ");
     frame.render_widget(tabs, area);
 
-    app.ui_map.stage_tabs = segment_tabs(area, Stage::ALL.as_slice());
+    for (idx, rect) in segment_rects(area, Stage::ALL.len())
+        .into_iter()
+        .enumerate()
+    {
+        app.click_regions
+            .register(rect, ClickTarget::StageTab(Stage::ALL[idx]));
+    }
 }
 
 fn draw_subtabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     match app.stage {
-        Stage::Scope => {
-            app.ui_map.scope_tabs.clear();
-        }
+        Stage::Scope => {}
         Stage::Naming => {
             let titles: Vec<Line<'_>> = NamingTab::ALL
                 .iter()
@@ -112,7 +116,13 @@ fn draw_subtabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
                     .divider("  "),
                 area,
             );
-            app.ui_map.naming_tabs = segment_tabs(area, NamingTab::ALL.as_slice());
+            for (idx, rect) in segment_rects(area, NamingTab::ALL.len())
+                .into_iter()
+                .enumerate()
+            {
+                app.click_regions
+                    .register(rect, ClickTarget::NamingTab(NamingTab::ALL[idx]));
+            }
         }
         Stage::Apply => {
             let text = Paragraph::new("Review simulated changes and session undo history")
@@ -123,14 +133,6 @@ fn draw_subtabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn draw_scope(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    app.ui_map.scope_main = area;
-    app.ui_map.scope_tabs.clear();
-    app.ui_map.file_rows.clear();
-    app.ui_map.select_rows.clear();
-    app.ui_map.constraint_rows.clear();
-    app.ui_map.preset_rows.clear();
-    app.ui_map.marketplace_rows.clear();
-
     let split = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
@@ -159,10 +161,7 @@ fn draw_scope_left(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     }
 
     let files_focus = app.focus == FocusPane::ScopeMain && app.scope_tab == ScopeTab::Files;
-    frame.render_widget(
-        focus_block("Files", files_focus),
-        sections[1],
-    );
+    frame.render_widget(focus_block("Files", files_focus), sections[1]);
     let files_inner = inner_rect(sections[1]);
     if files_inner.height > 0 && files_inner.width > 0 {
         draw_scope_files(frame, app, files_inner);
@@ -186,7 +185,11 @@ fn draw_scope_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .constraints([Constraint::Length(1), Constraint::Min(1)])
         .split(inner);
 
-    let right_tabs = [ScopeTab::Constraint, ScopeTab::Preset, ScopeTab::Marketplace];
+    let right_tabs = [
+        ScopeTab::Constraint,
+        ScopeTab::Preset,
+        ScopeTab::Marketplace,
+    ];
     let selected = match app.scope_right_tab {
         ScopeTab::Constraint => 0,
         ScopeTab::Preset => 1,
@@ -206,9 +209,13 @@ fn draw_scope_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .divider("  "),
         layout[0],
     );
-    app.ui_map
-        .scope_tabs
-        .extend(segment_tabs(layout[0], right_tabs.as_slice()));
+    for (idx, rect) in segment_rects(layout[0], right_tabs.len())
+        .into_iter()
+        .enumerate()
+    {
+        app.click_regions
+            .register(rect, ClickTarget::ScopeTab(right_tabs[idx]));
+    }
 
     match app.scope_right_tab {
         ScopeTab::Constraint => draw_scope_constraint(frame, app, layout[1]),
@@ -243,7 +250,6 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     }
 
     let mut items = Vec::new();
-    app.ui_map.file_rows.clear();
     for (idx, row) in visible
         .iter()
         .enumerate()
@@ -253,11 +259,7 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         let node = &app.tree.nodes[row.node_id];
         let indent = "  ".repeat(row.depth as usize);
         let branch = if node.is_dir {
-            if node.expanded {
-                "▾"
-            } else {
-                "▸"
-            }
+            if node.expanded { "▾" } else { "▸" }
         } else {
             "•"
         };
@@ -273,10 +275,10 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         items.push(ListItem::new(line).style(style));
 
         let y = area.y + (idx - app.tree.scroll) as u16;
-        app.ui_map.file_rows.push(RowHit {
-            rect: Rect::new(area.x, y, area.width, 1),
-            index: idx,
-        });
+        app.click_regions.register(
+            Rect::new(area.x, y, area.width, 1),
+            ClickTarget::ScopeFileRow(idx),
+        );
     }
 
     frame.render_widget(List::new(items), area);
@@ -288,7 +290,6 @@ fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .constraints([Constraint::Percentage(67), Constraint::Percentage(33)])
         .split(area);
 
-    app.ui_map.select_rows.clear();
     let mut left_items = Vec::new();
     for (idx, category) in app.category_filters.iter().enumerate() {
         let checked = category
@@ -307,16 +308,19 @@ fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
         let y = cols[0].y + idx as u16;
         if y < cols[0].y + cols[0].height {
-            app.ui_map.select_rows.push(RowHit {
-                rect: Rect::new(cols[0].x, y, cols[0].width, 1),
-                index: idx,
-            });
+            app.click_regions.register(
+                Rect::new(cols[0].x, y, cols[0].width, 1),
+                ClickTarget::ScopeCategoryRow(idx),
+            );
         }
     }
 
     frame.render_widget(
-        List::new(left_items)
-            .block(Block::default().title("Category Filters").borders(Borders::ALL)),
+        List::new(left_items).block(
+            Block::default()
+                .title("Category Filters")
+                .borders(Borders::ALL),
+        ),
         cols[0],
     );
 
@@ -343,7 +347,6 @@ fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
 fn draw_scope_constraint(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     let mut items = Vec::new();
-    app.ui_map.constraint_rows.clear();
     let mut index = 0usize;
 
     for item in crate::model::TimeConstraint::ALL {
@@ -357,10 +360,10 @@ fn draw_scope_constraint(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) 
         items.push(ListItem::new(format!("{mark} {}", item.title())).style(style));
         let y = area.y + index as u16;
         if y < area.y + area.height {
-            app.ui_map.constraint_rows.push(RowHit {
-                rect: Rect::new(area.x, y, area.width, 1),
-                index,
-            });
+            app.click_regions.register(
+                Rect::new(area.x, y, area.width, 1),
+                ClickTarget::ScopeConstraintRow(index),
+            );
         }
         index += 1;
     }
@@ -380,24 +383,26 @@ fn draw_scope_constraint(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) 
 
         let y = area.y + (index - 1) as u16;
         if y < area.y + area.height {
-            app.ui_map.constraint_rows.push(RowHit {
-                rect: Rect::new(area.x, y, area.width, 1),
-                index: index - 1,
-            });
+            app.click_regions.register(
+                Rect::new(area.x, y, area.width, 1),
+                ClickTarget::ScopeConstraintRow(index - 1),
+            );
         }
         index += 1;
     }
 
     frame.render_widget(
-        List::new(items)
-            .block(Block::default().title("Constraint options").borders(Borders::ALL)),
+        List::new(items).block(
+            Block::default()
+                .title("Constraint options")
+                .borders(Borders::ALL),
+        ),
         area,
     );
 }
 
 fn draw_scope_preset(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     let mut items = Vec::new();
-    app.ui_map.preset_rows.clear();
     for idx in 0..9usize {
         let has_value = app.presets[idx].is_some();
         let status = if has_value { "saved" } else { "empty" };
@@ -410,10 +415,10 @@ fn draw_scope_preset(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
         let y = area.y + idx as u16;
         if y < area.y + area.height {
-            app.ui_map.preset_rows.push(RowHit {
-                rect: Rect::new(area.x, y, area.width, 1),
-                index: idx,
-            });
+            app.click_regions.register(
+                Rect::new(area.x, y, area.width, 1),
+                ClickTarget::ScopePresetRow(idx),
+            );
         }
     }
 
@@ -429,7 +434,6 @@ fn draw_scope_preset(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
 fn draw_scope_marketplace(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     let mut items = Vec::new();
-    app.ui_map.marketplace_rows.clear();
     for (idx, preset) in app.marketplace_presets.iter().enumerate() {
         let style = if idx == app.marketplace_cursor {
             Theme::selected_row()
@@ -441,10 +445,10 @@ fn draw_scope_marketplace(frame: &mut Frame<'_>, app: &mut AppState, area: Rect)
 
         let y = area.y + idx as u16;
         if y < area.y + area.height {
-            app.ui_map.marketplace_rows.push(RowHit {
-                rect: Rect::new(area.x, y, area.width, 1),
-                index: idx,
-            });
+            app.click_regions.register(
+                Rect::new(area.x, y, area.width, 1),
+                ClickTarget::ScopeMarketplaceRow(idx),
+            );
         }
     }
 
@@ -483,13 +487,15 @@ fn draw_naming(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             .split(chunks[0])
     };
 
-    app.ui_map.naming_table = top[0];
-    app.ui_map.naming_right = top[1];
-    app.ui_map.naming_command = chunks[1];
-
     draw_naming_table(frame, app, top[0]);
     draw_naming_right(frame, app, top[1]);
     draw_command_box(frame, app, chunks[1]);
+    app.click_regions
+        .register(top[0], ClickTarget::NamingPane(FocusPane::NamingTable));
+    app.click_regions
+        .register(top[1], ClickTarget::NamingPane(FocusPane::NamingRight));
+    app.click_regions
+        .register(chunks[1], ClickTarget::NamingPane(FocusPane::NamingCommand));
 }
 
 fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
@@ -504,7 +510,6 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
                 .wrap(Wrap { trim: true }),
             inner,
         );
-        app.ui_map.rename_rows.clear();
         return;
     }
 
@@ -516,7 +521,6 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     }
 
     let mut items = Vec::new();
-    app.ui_map.rename_rows.clear();
     for (idx, row) in app
         .rename_rows
         .iter()
@@ -538,10 +542,10 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         items.push(ListItem::new(line).style(style));
 
         let y = inner.y + (idx - app.rename_scroll) as u16;
-        app.ui_map.rename_rows.push(RowHit {
-            rect: Rect::new(inner.x, y, inner.width, 1),
-            index: idx,
-        });
+        app.click_regions.register(
+            Rect::new(inner.x, y, inner.width, 1),
+            ClickTarget::NamingRow(idx),
+        );
     }
 
     frame.render_widget(List::new(items), inner);
@@ -558,7 +562,6 @@ fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
     match app.naming_tab {
         NamingTab::Suggestions => {
-            app.ui_map.suggestion_rows.clear();
             let mut items = Vec::new();
             for (idx, item) in app.suggestions.iter().enumerate() {
                 let style = if idx == app.suggestion_cursor {
@@ -570,23 +573,26 @@ fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
                 let y = inner.y + idx as u16;
                 if y < inner.y + inner.height {
-                    app.ui_map.suggestion_rows.push(RowHit {
-                        rect: Rect::new(inner.x, y, inner.width, 1),
-                        index: idx,
-                    });
+                    app.click_regions.register(
+                        Rect::new(inner.x, y, inner.width, 1),
+                        ClickTarget::NamingSuggestion(idx),
+                    );
                 }
             }
             frame.render_widget(List::new(items), inner);
         }
         NamingTab::Style => {
-            app.ui_map.style_rows.clear();
             let rows = vec![
                 format!("Length: {}", format_length(app.style.length)),
                 format!("Capitalization: {}", format_caps(app.style.capitalization)),
                 format!("Separator: {}", format_separator(app.style.separator)),
                 format!(
                     "Keep extension: {}",
-                    if app.style.keep_extension { "yes" } else { "no" }
+                    if app.style.keep_extension {
+                        "yes"
+                    } else {
+                        "no"
+                    }
                 ),
                 format!(
                     "Strip colons: {}",
@@ -605,10 +611,10 @@ fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
                 let y = inner.y + idx as u16;
                 if y < inner.y + inner.height {
-                    app.ui_map.style_rows.push(RowHit {
-                        rect: Rect::new(inner.x, y, inner.width, 1),
-                        index: idx,
-                    });
+                    app.click_regions.register(
+                        Rect::new(inner.x, y, inner.width, 1),
+                        ClickTarget::NamingStyleRow(idx),
+                    );
                 }
             }
 
@@ -618,7 +624,10 @@ fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn draw_command_box(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let block = focus_block("Natural style command (/)", app.focus == FocusPane::NamingCommand);
+    let block = focus_block(
+        "Natural style command (/)",
+        app.focus == FocusPane::NamingCommand,
+    );
     frame.render_widget(block, area);
     let inner = inner_rect(area);
 
@@ -649,16 +658,20 @@ fn draw_apply(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             .split(area)
     };
 
-    app.ui_map.apply_review = split[0];
-    app.ui_map.apply_history = split[1];
-
     draw_apply_review(frame, app, split[0]);
     draw_apply_history(frame, app, split[1]);
+    app.click_regions
+        .register(split[0], ClickTarget::ApplyPane(FocusPane::ApplyReview));
+    app.click_regions
+        .register(split[1], ClickTarget::ApplyPane(FocusPane::ApplyHistory));
 }
 
 fn draw_apply_review(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     frame.render_widget(
-        focus_block("Ready to Apply (simulated)", app.focus == FocusPane::ApplyReview),
+        focus_block(
+            "Ready to Apply (simulated)",
+            app.focus == FocusPane::ApplyReview,
+        ),
         area,
     );
 
@@ -671,12 +684,10 @@ fn draw_apply_review(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
                 .wrap(Wrap { trim: true }),
             inner,
         );
-        app.ui_map.apply_rows.clear();
         return;
     }
 
     let mut items = Vec::new();
-    app.ui_map.apply_rows.clear();
     for (idx, row) in selected_rows.iter().enumerate() {
         let style = if idx == app.apply_cursor {
             Theme::selected_row()
@@ -687,10 +698,10 @@ fn draw_apply_review(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         items.push(ListItem::new(line).style(style));
         let y = inner.y + idx as u16;
         if y < inner.y + inner.height {
-            app.ui_map.apply_rows.push(RowHit {
-                rect: Rect::new(inner.x, y, inner.width, 1),
-                index: idx,
-            });
+            app.click_regions.register(
+                Rect::new(inner.x, y, inner.width, 1),
+                ClickTarget::ApplyRow(idx),
+            );
         }
     }
 
@@ -710,12 +721,10 @@ fn draw_apply_history(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
                 .wrap(Wrap { trim: true }),
             inner,
         );
-        app.ui_map.history_rows.clear();
         return;
     }
 
     let mut items = Vec::new();
-    app.ui_map.history_rows.clear();
     for (idx, entry) in app.undo_history.iter().enumerate() {
         let style = if idx == app.history_cursor {
             Theme::selected_row()
@@ -738,10 +747,10 @@ fn draw_apply_history(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
         let y = inner.y + idx as u16;
         if y < inner.y + inner.height {
-            app.ui_map.history_rows.push(RowHit {
-                rect: Rect::new(inner.x, y, inner.width, 1),
-                index: idx,
-            });
+            app.click_regions.register(
+                Rect::new(inner.x, y, inner.width, 1),
+                ClickTarget::ApplyHistoryRow(idx),
+            );
         }
     }
 
@@ -751,13 +760,12 @@ fn draw_apply_history(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 fn draw_footer(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
     let hints = match app.stage {
         Stage::Scope => "Scope: arrows/space, left/right expand, ctrl+arrows deep expand, t subtab",
-        Stage::Naming => "Naming: space select row, e edit, g assign group, / style command, t subtab",
+        Stage::Naming => {
+            "Naming: space select row, e edit, g assign group, / style command, t subtab"
+        }
         Stage::Apply => "Apply: Enter submit+exit | Ctrl+Enter submit+stay (simulated)",
     };
-    frame.render_widget(
-        Paragraph::new(hints).style(Theme::muted_text()),
-        area,
-    );
+    frame.render_widget(Paragraph::new(hints).style(Theme::muted_text()), area);
 }
 
 fn draw_toast(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
@@ -802,7 +810,10 @@ fn draw_override_overlay(frame: &mut Frame<'_>, app: &AppState) {
             Line::from(""),
             Line::from(Span::styled(line, Theme::accent_text())),
             Line::from(""),
-            Line::from(Span::styled("Enter: save, Esc: cancel, Tab: autocomplete", Theme::muted_text())),
+            Line::from(Span::styled(
+                "Enter: save, Esc: cancel, Tab: autocomplete",
+                Theme::muted_text(),
+            )),
         ])
         .block(
             Block::default()
@@ -871,7 +882,14 @@ fn focus_block<'a>(title: &'a str, focused: bool) -> Block<'a> {
     };
 
     Block::default()
-        .title(Span::styled(title, if focused { Theme::accent_text() } else { Theme::muted_text() }))
+        .title(Span::styled(
+            title,
+            if focused {
+                Theme::accent_text()
+            } else {
+                Theme::muted_text()
+            },
+        ))
         .borders(Borders::ALL)
         .border_style(border_style)
 }
@@ -893,23 +911,21 @@ fn center(area: Rect, width_pct: u16, height_pct: u16) -> Rect {
     Rect::new(x, y, width.max(1), height.max(1))
 }
 
-fn segment_tabs<T: Copy>(area: Rect, items: &[T]) -> Vec<TabHit<T>> {
-    if items.is_empty() {
+fn segment_rects(area: Rect, count: usize) -> Vec<Rect> {
+    if count == 0 {
         return Vec::new();
     }
 
-    let chunk_width = (area.width / items.len() as u16).max(1);
-    items
-        .iter()
-        .enumerate()
-        .map(|(idx, value)| {
+    let chunk_width = (area.width / count as u16).max(1);
+    (0..count)
+        .map(|idx| {
             let x = area.x + (idx as u16 * chunk_width);
-            let width = if idx == items.len() - 1 {
+            let width = if idx == count - 1 {
                 area.x + area.width - x
             } else {
                 chunk_width
             };
-            TabHit::new(Rect::new(x, area.y, width, area.height.max(1)), *value)
+            Rect::new(x, area.y, width, area.height.max(1))
         })
         .collect()
 }

@@ -100,7 +100,9 @@ fn map_normal_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
         KeyCode::Char('g') => vec![Action::StartGroupAssign],
         KeyCode::Char('/') => vec![Action::StartCommandInput],
         KeyCode::Char('n') => vec![Action::StartNewCategoryInput],
-        KeyCode::Char('a') if app.stage == Stage::Scope && app.scope_tab == ScopeTab::Marketplace => {
+        KeyCode::Char('a')
+            if app.stage == Stage::Scope && app.scope_tab == ScopeTab::Marketplace =>
+        {
             vec![Action::ApplyMarketplace(app.marketplace_cursor)]
         }
         KeyCode::Char(ch @ '1'..='9') => {

@@ -1,6 +1,4 @@
-use crate::{
-    model::{AppState, FocusPane, InputMode, NamingTab, ScopeTab, Stage},
-};
+use crate::model::{AppState, ClickTarget, FocusPane, InputMode, NamingTab, ScopeTab, Stage};
 
 #[derive(Debug, Clone)]
 pub enum Action {
@@ -83,7 +81,7 @@ pub fn reduce(app: &mut AppState, action: Action) {
         Action::StartCommandInput => {
             if app.stage == Stage::Naming {
                 app.mode = InputMode::Command;
-                app.focus = FocusPane::NamingCommand;
+                app.set_focus(FocusPane::NamingCommand);
             }
         }
         Action::StartNewCategoryInput => {
@@ -156,7 +154,7 @@ fn handle_left(app: &mut AppState) {
                 app.naming_tab = app.naming_tab.next();
             }
         }
-        Stage::Apply => app.focus = FocusPane::ApplyReview,
+        Stage::Apply => app.set_focus(FocusPane::ApplyReview),
     }
 }
 
@@ -176,7 +174,7 @@ fn handle_right(app: &mut AppState) {
                 app.naming_tab = app.naming_tab.next();
             }
         }
-        Stage::Apply => app.focus = FocusPane::ApplyHistory,
+        Stage::Apply => app.set_focus(FocusPane::ApplyHistory),
     }
 }
 
@@ -222,182 +220,71 @@ fn handle_commit(app: &mut AppState) {
     }
 }
 
-fn contains(rect: ratatui::layout::Rect, col: u16, row: u16) -> bool {
-    col >= rect.x
-        && col < rect.x.saturating_add(rect.width)
-        && row >= rect.y
-        && row < rect.y.saturating_add(rect.height)
-}
-
 fn handle_mouse_click(app: &mut AppState, col: u16, row: u16) {
-    if let Some(stage) = app
-        .ui_map
-        .stage_tabs
-        .iter()
-        .find(|tab| contains(tab.rect, col, row))
-        .map(|tab| tab.value)
-    {
-        app.set_stage(stage);
+    let Some(target) = app.click_regions.handle_click(col, row).cloned() else {
         return;
-    }
+    };
 
-    match app.stage {
-        Stage::Scope => {
-            if let Some(tab) = app
-                .ui_map
-                .scope_tabs
-                .iter()
-                .find(|tab| contains(tab.rect, col, row))
-                .map(|tab| tab.value)
-            {
-                app.set_scope_tab(tab);
-                return;
-            }
-
-            if let Some(index) = app
-                .ui_map
-                .file_rows
-                .iter()
-                .find(|hit| contains(hit.rect, col, row))
-                .map(|hit| hit.index)
-            {
-                app.set_scope_tab(ScopeTab::Files);
-                app.tree.cursor = index;
-                app.tree.fix_cursor();
-                app.toggle_scope_file_selection();
-                return;
-            }
-
-            if let Some(index) = app
-                .ui_map
-                .select_rows
-                .iter()
-                .find(|hit| contains(hit.rect, col, row))
-                .map(|hit| hit.index)
-            {
-                app.set_scope_tab(ScopeTab::Select);
-                app.select_cursor = index;
-                app.toggle_current_scope_filter();
-                return;
-            }
-
-            if let Some(index) = app
-                .ui_map
-                .constraint_rows
-                .iter()
-                .find(|hit| contains(hit.rect, col, row))
-                .map(|hit| hit.index)
-            {
-                app.set_scope_tab(ScopeTab::Constraint);
-                app.constraint_cursor = index;
-                app.toggle_current_scope_filter();
-                return;
-            }
-
-            if let Some(index) = app
-                .ui_map
-                .preset_rows
-                .iter()
-                .find(|hit| contains(hit.rect, col, row))
-                .map(|hit| hit.index)
-            {
-                app.set_scope_tab(ScopeTab::Preset);
-                app.preset_cursor = index;
-                app.load_preset((index + 1) as u8);
-                return;
-            }
-
-            if let Some(index) = app
-                .ui_map
-                .marketplace_rows
-                .iter()
-                .find(|hit| contains(hit.rect, col, row))
-                .map(|hit| hit.index)
-            {
-                app.set_scope_tab(ScopeTab::Marketplace);
-                app.marketplace_cursor = index;
-                app.apply_marketplace(index);
-            }
+    match target {
+        ClickTarget::StageTab(stage) => app.set_stage(stage),
+        ClickTarget::ScopeTab(tab) => app.set_scope_tab(tab),
+        ClickTarget::NamingTab(tab) => app.naming_tab = tab,
+        ClickTarget::ScopeFileRow(index) => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.tree.cursor = index;
+            app.tree.fix_cursor();
+            app.toggle_scope_file_selection();
         }
-        Stage::Naming => {
-            if let Some(tab) = app
-                .ui_map
-                .naming_tabs
-                .iter()
-                .find(|tab| contains(tab.rect, col, row))
-                .map(|tab| tab.value)
-            {
-                app.naming_tab = tab;
-                return;
-            }
-
-            if contains(app.ui_map.naming_table, col, row) {
-                app.focus = FocusPane::NamingTable;
-            } else if contains(app.ui_map.naming_right, col, row) {
-                app.focus = FocusPane::NamingRight;
-            } else if contains(app.ui_map.naming_command, col, row) {
-                app.focus = FocusPane::NamingCommand;
+        ClickTarget::ScopeCategoryRow(index) => {
+            app.set_scope_tab(ScopeTab::Select);
+            app.select_cursor = index;
+            app.toggle_current_scope_filter();
+        }
+        ClickTarget::ScopeConstraintRow(index) => {
+            app.set_scope_tab(ScopeTab::Constraint);
+            app.constraint_cursor = index;
+            app.toggle_current_scope_filter();
+        }
+        ClickTarget::ScopePresetRow(index) => {
+            app.set_scope_tab(ScopeTab::Preset);
+            app.preset_cursor = index;
+            app.load_preset((index + 1) as u8);
+        }
+        ClickTarget::ScopeMarketplaceRow(index) => {
+            app.set_scope_tab(ScopeTab::Marketplace);
+            app.marketplace_cursor = index;
+            app.apply_marketplace(index);
+        }
+        ClickTarget::NamingPane(focus) => {
+            app.set_focus(focus);
+            if focus == FocusPane::NamingCommand {
                 app.mode = InputMode::Command;
             }
-
-            if let Some(hit) = app
-                .ui_map
-                .rename_rows
-                .iter()
-                .find(|hit| contains(hit.rect, col, row))
-            {
-                app.rename_cursor = hit.index;
-                app.toggle_current_naming_row();
-                return;
-            }
-
-            if app.naming_tab == NamingTab::Suggestions
-                && let Some(hit) = app
-                    .ui_map
-                    .suggestion_rows
-                    .iter()
-                    .find(|hit| contains(hit.rect, col, row))
-            {
-                app.suggestion_cursor = hit.index;
-                app.apply_suggestion();
-                return;
-            }
-
-            if app.naming_tab == NamingTab::Style
-                && let Some(hit) = app
-                    .ui_map
-                    .style_rows
-                    .iter()
-                    .find(|hit| contains(hit.rect, col, row))
-            {
-                app.style_cursor = hit.index;
-            }
         }
-        Stage::Apply => {
-            if contains(app.ui_map.apply_review, col, row) {
-                app.focus = FocusPane::ApplyReview;
-            }
-            if contains(app.ui_map.apply_history, col, row) {
-                app.focus = FocusPane::ApplyHistory;
-            }
-
-            if let Some(hit) = app
-                .ui_map
-                .apply_rows
-                .iter()
-                .find(|hit| contains(hit.rect, col, row))
-            {
-                app.apply_cursor = hit.index;
-            }
-
-            if let Some(hit) = app
-                .ui_map
-                .history_rows
-                .iter()
-                .find(|hit| contains(hit.rect, col, row))
-            {
-                app.history_cursor = hit.index;
-            }
+        ClickTarget::NamingRow(index) => {
+            app.set_focus(FocusPane::NamingTable);
+            app.rename_cursor = index;
+            app.toggle_current_naming_row();
+        }
+        ClickTarget::NamingSuggestion(index) => {
+            app.set_focus(FocusPane::NamingRight);
+            app.naming_tab = NamingTab::Suggestions;
+            app.suggestion_cursor = index;
+            app.apply_suggestion();
+        }
+        ClickTarget::NamingStyleRow(index) => {
+            app.set_focus(FocusPane::NamingRight);
+            app.naming_tab = NamingTab::Style;
+            app.style_cursor = index;
+        }
+        ClickTarget::ApplyPane(focus) => app.set_focus(focus),
+        ClickTarget::ApplyRow(index) => {
+            app.set_focus(FocusPane::ApplyReview);
+            app.apply_cursor = index;
+        }
+        ClickTarget::ApplyHistoryRow(index) => {
+            app.set_focus(FocusPane::ApplyHistory);
+            app.history_cursor = index;
         }
     }
 }

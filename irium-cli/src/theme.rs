@@ -48,7 +48,9 @@ impl Theme {
     }
 
     pub fn accent_text() -> Style {
-        Style::default().fg(Self::accent()).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Self::accent())
+            .add_modifier(Modifier::BOLD)
     }
 
     pub fn selected_row() -> Style {
