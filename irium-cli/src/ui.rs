@@ -65,6 +65,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut AppState) {
     if app.show_log_overlay {
         draw_log_overlay(frame, app);
     }
+
+    if app.show_prompt_history_overlay {
+        draw_prompt_history_overlay(frame, app);
+    }
 }
 
 fn draw_minimum_size_warning(frame: &mut Frame<'_>, area: Rect) {
@@ -155,8 +159,10 @@ fn draw_subtabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         Stage::Scope => {}
         Stage::Naming => {
             frame.render_widget(
-                Paragraph::new("Right pane: AI suggestions (top) + Style Controls (bottom)")
-                    .style(Theme::muted_text()),
+                Paragraph::new(
+                    "Right pane: AI suggestions (top) + Style Controls (bottom). p: prompt history",
+                )
+                .style(Theme::muted_text()),
                 area,
             );
         }
@@ -1259,9 +1265,7 @@ fn draw_apply_history(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 fn draw_footer(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
     let hints = match app.stage {
         Stage::Scope => "Scope: arrows/space, left/right expand, ctrl+arrows deep expand, t subtab",
-        Stage::Naming => {
-            "Naming: r refresh, m settings, 1-3 row options, / style command, t subtab"
-        }
+        Stage::Naming => "Naming: r refresh, m settings, p prompt history, / prompt, t subtab",
         Stage::Apply => "Apply: Enter submit+exit | Ctrl+Enter submit+stay (simulated)",
     };
     frame.render_widget(Paragraph::new(hints).style(Theme::muted_text()), area);
@@ -1397,6 +1401,43 @@ fn draw_log_overlay(frame: &mut Frame<'_>, app: &mut AppState) {
     frame.render_widget(List::new(items), inner);
 }
 
+fn draw_prompt_history_overlay(frame: &mut Frame<'_>, app: &mut AppState) {
+    let area = center(frame.area(), 82, 64);
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title("Prompt History (p to close, Enter to load)")
+        .borders(Borders::ALL)
+        .border_style(Theme::accent_text());
+    frame.render_widget(block, area);
+
+    let inner = inner_rect(area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+    app.prompt_history_set_view_height(inner.height as usize);
+
+    if app.prompt_history.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No prompt history yet. Submit prompts in Naming to store them.")
+                .style(Theme::muted_text())
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    }
+
+    let mut items = Vec::new();
+    for (display_idx, prompt) in app.visible_prompt_history_items() {
+        let style = if display_idx == app.prompt_history_cursor {
+            Theme::selected_row()
+        } else {
+            Theme::panel()
+        };
+        items.push(ListItem::new(prompt).style(style));
+    }
+    frame.render_widget(List::new(items), inner);
+}
+
 fn slice_char_start(line: &str, start: usize) -> &str {
     if start == 0 {
         return line;
@@ -1410,6 +1451,7 @@ fn slice_char_start(line: &str, start: usize) -> &str {
 
 fn format_length(length: NameLength) -> &'static str {
     match length {
+        NameLength::None => "none",
         NameLength::Long => "long",
         NameLength::Medium => "medium",
         NameLength::Short => "short",
@@ -1418,6 +1460,7 @@ fn format_length(length: NameLength) -> &'static str {
 
 fn format_caps(caps: Capitalization) -> &'static str {
     match caps {
+        Capitalization::None => "none",
         Capitalization::Lower => "lower",
         Capitalization::Title => "title",
         Capitalization::Upper => "upper",

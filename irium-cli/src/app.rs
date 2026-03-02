@@ -14,7 +14,9 @@ use crate::{
         self,
         worker::{AiWorkerCommand, AiWorkerEvent, WorkerProgressStage},
     },
-    config::{AppConfig, load_app_config, save_app_config},
+    config::{
+        AppConfig, load_app_config, load_prompt_history, save_app_config, save_prompt_history,
+    },
     fs_scan::{self, FsEntry},
     mock,
     model::{
@@ -36,10 +38,20 @@ fn build_ai_settings_from_config(config: &AppConfig) -> AiSettingsState {
     settings
 }
 
+const MAX_PROMPT_HISTORY_ENTRIES: usize = 200;
+
 impl AppState {
     pub fn new(cwd: PathBuf) -> Self {
         let tree = FileTree::new(cwd.clone());
         let loaded_config = load_app_config().unwrap_or_default();
+        let (mut prompt_history, prompt_history_error) = match load_prompt_history() {
+            Ok(entries) => (entries, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
+        if prompt_history.len() > MAX_PROMPT_HISTORY_ENTRIES {
+            let drop_count = prompt_history.len() - MAX_PROMPT_HISTORY_ENTRIES;
+            prompt_history.drain(0..drop_count);
+        }
         let mut ai_settings = build_ai_settings_from_config(&loaded_config);
         let (ai_worker_tx, ai_worker_rx) = match ai::worker::spawn_worker() {
             Ok((tx, rx)) => (Some(tx), Some(rx)),
@@ -85,6 +97,8 @@ impl AppState {
             style: StyleOptions::default(),
             style_cursor: 0,
             command_input: String::new(),
+            command_history_nav: None,
+            command_history_draft: None,
             override_input: String::new(),
             editing_row: None,
             override_vocab: Default::default(),
@@ -100,6 +114,11 @@ impl AppState {
             log_view_height: 0,
             log_col_scroll: 0,
             log_view_width: 0,
+            prompt_history,
+            show_prompt_history_overlay: false,
+            prompt_history_cursor: 0,
+            prompt_history_scroll: 0,
+            prompt_history_view_height: 0,
             undo_history: Vec::new(),
             apply_cursor: 0,
             history_cursor: 0,
@@ -112,7 +131,7 @@ impl AppState {
                     "Files: arrows move | Space select | A select-all | p settings | v toggle category-filter",
                 ),
                 Line::from(
-                    "Naming: r refresh AI | m suggestions settings | 1-3 row option | / prompt",
+                    "Naming: r refresh AI | m suggestions settings | p prompt history | 1-3 row option | / prompt",
                 ),
                 Line::from("Apply: Enter submit+exit (simulated) | Ctrl+Enter submit+stay"),
             ],
@@ -143,6 +162,9 @@ impl AppState {
         app.reload_tree();
         app.sync_rename_rows();
         app.append_log("INFO", "App initialized");
+        if let Some(error) = prompt_history_error {
+            app.append_log("WARN", &format!("Prompt history load failed: {error}"));
+        }
         app.naming_ai_status = if app.ai_settings_has_minimum_config() {
             NamingAiStatus::Idle
         } else {
@@ -322,6 +344,165 @@ impl AppState {
     pub fn scroll_log_right(&mut self) {
         let max_start = self.max_log_col_start();
         self.log_col_scroll = self.log_col_scroll.saturating_add(1).min(max_start);
+    }
+
+    pub fn toggle_prompt_history_overlay(&mut self) {
+        self.show_prompt_history_overlay = !self.show_prompt_history_overlay;
+        if self.show_prompt_history_overlay {
+            self.mode = InputMode::Normal;
+            self.prompt_history_cursor = 0;
+            self.prompt_history_scroll = 0;
+        }
+    }
+
+    pub fn prompt_history_move_up(&mut self) {
+        self.prompt_history_cursor = self.prompt_history_cursor.saturating_sub(1);
+        self.clamp_prompt_history_scroll();
+    }
+
+    pub fn prompt_history_move_down(&mut self) {
+        if self.prompt_history.is_empty() {
+            self.prompt_history_cursor = 0;
+            self.prompt_history_scroll = 0;
+            return;
+        }
+        self.prompt_history_cursor = self
+            .prompt_history_cursor
+            .saturating_add(1)
+            .min(self.prompt_history.len() - 1);
+        self.clamp_prompt_history_scroll();
+    }
+
+    pub fn prompt_history_set_view_height(&mut self, height: usize) {
+        self.prompt_history_view_height = height.max(1);
+        self.clamp_prompt_history_scroll();
+    }
+
+    pub fn reset_command_history_nav(&mut self) {
+        self.command_history_nav = None;
+        self.command_history_draft = None;
+    }
+
+    pub fn command_history_prev(&mut self) {
+        if self.prompt_history.is_empty() {
+            return;
+        }
+        let max_offset = self.prompt_history.len() - 1;
+        let next_offset = match self.command_history_nav {
+            None => {
+                self.command_history_draft = Some(self.command_input.clone());
+                0
+            }
+            Some(current) => current.saturating_add(1).min(max_offset),
+        };
+        self.command_history_nav = Some(next_offset);
+        if let Some(prompt) = self.prompt_history_by_offset(next_offset) {
+            self.command_input = prompt;
+        }
+    }
+
+    pub fn command_history_next(&mut self) {
+        let Some(current) = self.command_history_nav else {
+            return;
+        };
+
+        if current == 0 {
+            self.command_history_nav = None;
+            self.command_input = self.command_history_draft.take().unwrap_or_default();
+            return;
+        }
+
+        let next_offset = current - 1;
+        self.command_history_nav = Some(next_offset);
+        if let Some(prompt) = self.prompt_history_by_offset(next_offset) {
+            self.command_input = prompt;
+        }
+    }
+
+    pub fn select_prompt_history_entry(&mut self) {
+        let Some(prompt) = self.prompt_history_entry_at_cursor() else {
+            self.push_toast(ToastLevel::Warning, "Prompt history is empty");
+            return;
+        };
+        self.command_input = prompt;
+        self.show_prompt_history_overlay = false;
+        self.set_focus(FocusPane::NamingCommand);
+        self.mode = InputMode::Command;
+        self.reset_command_history_nav();
+        self.push_toast(ToastLevel::Info, "Loaded prompt from history");
+    }
+
+    pub fn visible_prompt_history_items(&self) -> Vec<(usize, String)> {
+        let len = self.prompt_history.len();
+        let max_visible = self.prompt_history_view_height.max(1);
+        let start = self
+            .prompt_history_scroll
+            .min(len.saturating_sub(max_visible));
+        let end = (start + max_visible).min(len);
+        let mut out = Vec::with_capacity(end.saturating_sub(start));
+        for display_idx in start..end {
+            let actual_idx = len.saturating_sub(1).saturating_sub(display_idx);
+            if let Some(item) = self.prompt_history.get(actual_idx) {
+                out.push((display_idx, item.clone()));
+            }
+        }
+        out
+    }
+
+    fn prompt_history_entry_at_cursor(&self) -> Option<String> {
+        let len = self.prompt_history.len();
+        if len == 0 {
+            return None;
+        }
+        let actual_idx = len
+            .saturating_sub(1)
+            .saturating_sub(self.prompt_history_cursor);
+        self.prompt_history.get(actual_idx).cloned()
+    }
+
+    fn prompt_history_by_offset(&self, offset_from_latest: usize) -> Option<String> {
+        let len = self.prompt_history.len();
+        if len == 0 {
+            return None;
+        }
+        let actual_idx = len.saturating_sub(1).saturating_sub(offset_from_latest);
+        self.prompt_history.get(actual_idx).cloned()
+    }
+
+    fn clamp_prompt_history_scroll(&mut self) {
+        let len = self.prompt_history.len();
+        if len == 0 {
+            self.prompt_history_cursor = 0;
+            self.prompt_history_scroll = 0;
+            return;
+        }
+        let max_cursor = len - 1;
+        self.prompt_history_cursor = self.prompt_history_cursor.min(max_cursor);
+        let visible = self.prompt_history_view_height.max(1);
+        let max_start = len.saturating_sub(visible);
+        if self.prompt_history_cursor < self.prompt_history_scroll {
+            self.prompt_history_scroll = self.prompt_history_cursor;
+        } else if self.prompt_history_cursor >= self.prompt_history_scroll + visible {
+            self.prompt_history_scroll = self.prompt_history_cursor + 1 - visible;
+        }
+        self.prompt_history_scroll = self.prompt_history_scroll.min(max_start);
+    }
+
+    fn push_prompt_history(&mut self, prompt: &str) {
+        let prompt = prompt.trim();
+        if prompt.is_empty() {
+            return;
+        }
+        self.prompt_history.retain(|entry| entry != prompt);
+        self.prompt_history.push(prompt.to_string());
+        if self.prompt_history.len() > MAX_PROMPT_HISTORY_ENTRIES {
+            let drop_count = self.prompt_history.len() - MAX_PROMPT_HISTORY_ENTRIES;
+            self.prompt_history.drain(0..drop_count);
+        }
+        if let Err(error) = save_prompt_history(&self.prompt_history) {
+            self.append_log("WARN", &format!("Prompt history save failed: {error}"));
+        }
+        self.clamp_prompt_history_scroll();
     }
 
     pub fn copy_log_line(&mut self, index: usize) {
@@ -1774,6 +1955,7 @@ impl AppState {
 
     pub fn apply_command_input(&mut self) {
         let command = self.command_input.trim().to_string();
+        self.reset_command_history_nav();
         self.command_input.clear();
         self.mode = InputMode::Normal;
 
@@ -1785,6 +1967,7 @@ impl AppState {
             return;
         }
 
+        self.push_prompt_history(&command);
         self.trigger_naming_suggestions_refresh_with_prompt(Some(command));
     }
 

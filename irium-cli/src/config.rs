@@ -51,6 +51,50 @@ pub fn config_path() -> Option<PathBuf> {
     Some(base.join("irium").join("config.toml"))
 }
 
+pub fn load_prompt_history() -> Result<Vec<String>, String> {
+    let Some(path) = prompt_history_path() else {
+        return Ok(Vec::new());
+    };
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let raw = fs::read_to_string(&path)
+        .map_err(|e| format!("Could not read prompt history {}: {e}", path.display()))?;
+    let entries = serde_json::from_str::<Vec<String>>(&raw)
+        .map_err(|e| format!("Could not parse prompt history {}: {e}", path.display()))?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect())
+}
+
+pub fn save_prompt_history(entries: &[String]) -> Result<PathBuf, String> {
+    let Some(path) = prompt_history_path() else {
+        return Err("Could not resolve prompt history directory".to_string());
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Could not create prompt history directory {}: {e}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let json = serde_json::to_string_pretty(entries)
+        .map_err(|e| format!("Could not serialize prompt history: {e}"))?;
+    fs::write(&path, json)
+        .map_err(|e| format!("Could not write prompt history {}: {e}", path.display()))?;
+    Ok(path)
+}
+
+pub fn prompt_history_path() -> Option<PathBuf> {
+    let base = dirs::data_local_dir().or_else(dirs::data_dir)?;
+    Some(base.join("irium").join("prompt_history.json"))
+}
+
 #[cfg(unix)]
 fn set_secure_permissions(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;

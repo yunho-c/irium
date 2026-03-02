@@ -55,6 +55,9 @@ fn map_key(app: &AppState, key: KeyEvent) -> Vec<Action> {
     if app.show_log_overlay {
         return map_log_overlay_keys(key);
     }
+    if app.show_prompt_history_overlay {
+        return map_prompt_history_keys(key);
+    }
 
     match app.mode {
         InputMode::EditingOverride
@@ -102,11 +105,40 @@ fn map_log_overlay_keys(key: KeyEvent) -> Vec<Action> {
     }
 }
 
+fn map_prompt_history_keys(key: KeyEvent) -> Vec<Action> {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return Vec::new();
+    }
+    match key.code {
+        KeyCode::Char('p') | KeyCode::Char('P') => vec![Action::TogglePromptHistoryOverlay],
+        KeyCode::Esc => vec![Action::TogglePromptHistoryOverlay],
+        KeyCode::Enter => vec![Action::SelectPromptHistoryEntry],
+        KeyCode::Up | KeyCode::Char('k') => vec![Action::PromptHistoryUp],
+        KeyCode::Down | KeyCode::Char('j') => vec![Action::PromptHistoryDown],
+        KeyCode::PageUp => vec![
+            Action::PromptHistoryUp,
+            Action::PromptHistoryUp,
+            Action::PromptHistoryUp,
+        ],
+        KeyCode::PageDown => vec![
+            Action::PromptHistoryDown,
+            Action::PromptHistoryDown,
+            Action::PromptHistoryDown,
+        ],
+        _ => Vec::new(),
+    }
+}
+
 fn map_text_input_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
     match key.code {
         KeyCode::Esc => vec![Action::CancelInput],
         KeyCode::Enter => vec![Action::CommitInput],
         KeyCode::Backspace => vec![Action::Backspace],
+        KeyCode::Up if app.mode == InputMode::Command => vec![Action::CommandHistoryPrev],
+        KeyCode::Down if app.mode == InputMode::Command => vec![Action::CommandHistoryNext],
         KeyCode::Tab
             if matches!(
                 app.mode,
@@ -227,6 +259,14 @@ fn map_normal_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
         && app.focus == FocusPane::ScopeFiles
     {
         return vec![Action::SelectAllVisibleFiles];
+    }
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        && matches!(key.code, KeyCode::Char('p') | KeyCode::Char('P'))
+        && app.stage == Stage::Naming
+    {
+        return vec![Action::TogglePromptHistoryOverlay];
     }
     if !key
         .modifiers

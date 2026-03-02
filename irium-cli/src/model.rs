@@ -147,6 +147,7 @@ pub enum InputMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameLength {
+    None,
     Long,
     Medium,
     Short,
@@ -155,15 +156,17 @@ pub enum NameLength {
 impl NameLength {
     pub fn next(self) -> Self {
         match self {
+            NameLength::None => NameLength::Long,
             NameLength::Long => NameLength::Medium,
             NameLength::Medium => NameLength::Short,
-            NameLength::Short => NameLength::Long,
+            NameLength::Short => NameLength::None,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            NameLength::Long => NameLength::Short,
+            NameLength::None => NameLength::Short,
+            NameLength::Long => NameLength::None,
             NameLength::Medium => NameLength::Long,
             NameLength::Short => NameLength::Medium,
         }
@@ -172,6 +175,7 @@ impl NameLength {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capitalization {
+    None,
     Lower,
     Title,
     Upper,
@@ -180,15 +184,17 @@ pub enum Capitalization {
 impl Capitalization {
     pub fn next(self) -> Self {
         match self {
+            Capitalization::None => Capitalization::Lower,
             Capitalization::Lower => Capitalization::Title,
             Capitalization::Title => Capitalization::Upper,
-            Capitalization::Upper => Capitalization::Lower,
+            Capitalization::Upper => Capitalization::None,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Capitalization::Lower => Capitalization::Upper,
+            Capitalization::None => Capitalization::Upper,
+            Capitalization::Lower => Capitalization::None,
             Capitalization::Title => Capitalization::Lower,
             Capitalization::Upper => Capitalization::Title,
         }
@@ -572,6 +578,8 @@ pub struct AppState {
     pub style_cursor: usize,
 
     pub command_input: String,
+    pub command_history_nav: Option<usize>,
+    pub command_history_draft: Option<String>,
     pub override_input: String,
     pub editing_row: Option<usize>,
     pub override_vocab: BTreeSet<String>,
@@ -583,6 +591,11 @@ pub struct AppState {
     pub log_view_height: usize,
     pub log_col_scroll: usize,
     pub log_view_width: usize,
+    pub prompt_history: Vec<String>,
+    pub show_prompt_history_overlay: bool,
+    pub prompt_history_cursor: usize,
+    pub prompt_history_scroll: usize,
+    pub prompt_history_view_height: usize,
     pub undo_history: Vec<SessionUndoEntry>,
     pub apply_cursor: usize,
     pub history_cursor: usize,

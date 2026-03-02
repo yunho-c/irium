@@ -14,6 +14,10 @@ pub enum Action {
     ScrollLogDown,
     ScrollLogLeft,
     ScrollLogRight,
+    TogglePromptHistoryOverlay,
+    PromptHistoryUp,
+    PromptHistoryDown,
+    SelectPromptHistoryEntry,
     ToggleHelp,
     NextStage,
     PrevStage,
@@ -51,6 +55,8 @@ pub enum Action {
     Submit { stay: bool },
     StartOverrideEdit,
     StartCommandInput,
+    CommandHistoryPrev,
+    CommandHistoryNext,
     StartNewCategoryInput,
     StartGroupAssign,
     AssignGroup(u8),
@@ -77,6 +83,14 @@ pub fn reduce(app: &mut AppState, action: Action) {
         Action::ScrollLogDown => app.scroll_log_down(),
         Action::ScrollLogLeft => app.scroll_log_left(),
         Action::ScrollLogRight => app.scroll_log_right(),
+        Action::TogglePromptHistoryOverlay => {
+            if app.stage == Stage::Naming {
+                app.toggle_prompt_history_overlay();
+            }
+        }
+        Action::PromptHistoryUp => app.prompt_history_move_up(),
+        Action::PromptHistoryDown => app.prompt_history_move_down(),
+        Action::SelectPromptHistoryEntry => app.select_prompt_history_entry(),
         Action::ToggleHelp => app.show_help = !app.show_help,
         Action::NextStage => app.set_stage(app.stage.next()),
         Action::PrevStage => app.set_stage(app.stage.prev()),
@@ -178,6 +192,17 @@ pub fn reduce(app: &mut AppState, action: Action) {
             if app.stage == Stage::Naming {
                 app.mode = InputMode::Command;
                 app.set_focus(FocusPane::NamingCommand);
+                app.reset_command_history_nav();
+            }
+        }
+        Action::CommandHistoryPrev => {
+            if app.mode == InputMode::Command {
+                app.command_history_prev();
+            }
+        }
+        Action::CommandHistoryNext => {
+            if app.mode == InputMode::Command {
+                app.command_history_next();
             }
         }
         Action::StartNewCategoryInput => {
@@ -199,7 +224,10 @@ pub fn reduce(app: &mut AppState, action: Action) {
         }
         Action::InputChar(ch) => match app.mode {
             InputMode::EditingOverride => app.override_input.push(ch),
-            InputMode::Command => app.command_input.push(ch),
+            InputMode::Command => {
+                app.reset_command_history_nav();
+                app.command_input.push(ch);
+            }
             InputMode::NewCategory => app.new_category_input.push(ch),
             InputMode::EditingAiApiKey => app.ai_settings.api_key_input.push(ch),
             InputMode::EditingAiModelSearch => app.ai_settings.model_search_query.push(ch),
@@ -211,6 +239,7 @@ pub fn reduce(app: &mut AppState, action: Action) {
                 app.override_input.pop();
             }
             InputMode::Command => {
+                app.reset_command_history_nav();
                 app.command_input.pop();
             }
             InputMode::NewCategory => {
@@ -230,8 +259,11 @@ pub fn reduce(app: &mut AppState, action: Action) {
         Action::CommitInput => handle_commit(app),
         Action::CancelInput => match app.mode {
             InputMode::EditingOverride => app.cancel_override_edit(),
-            InputMode::Command
-            | InputMode::NewCategory
+            InputMode::Command => {
+                app.reset_command_history_nav();
+                app.mode = InputMode::Normal;
+            }
+            InputMode::NewCategory
             | InputMode::AwaitGroup
             | InputMode::EditingAiApiKey
             | InputMode::EditingAiModelSearch
@@ -365,6 +397,9 @@ fn handle_commit(app: &mut AppState) {
 }
 
 fn handle_mouse_down(app: &mut AppState, col: u16, row: u16) {
+    if app.show_prompt_history_overlay {
+        return;
+    }
     if app.show_log_overlay {
         if let Some(target) = app.click_target_at_topmost(col, row) {
             handle_click_target(app, target);
@@ -425,6 +460,9 @@ fn handle_mouse_down(app: &mut AppState, col: u16, row: u16) {
 }
 
 fn handle_mouse_drag(app: &mut AppState, col: u16, row: u16) {
+    if app.show_prompt_history_overlay {
+        return;
+    }
     if app.show_log_overlay {
         return;
     }
@@ -472,6 +510,9 @@ fn handle_mouse_drag(app: &mut AppState, col: u16, row: u16) {
 }
 
 fn handle_mouse_up(app: &mut AppState, _col: u16, _row: u16) {
+    if app.show_prompt_history_overlay {
+        return;
+    }
     if app.show_log_overlay {
         return;
     }
@@ -622,6 +663,15 @@ fn handle_click_target(app: &mut AppState, target: ClickTarget) {
 
 fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) {
     let delta: isize = if scroll_up { -1 } else { 1 };
+
+    if app.show_prompt_history_overlay {
+        if scroll_up {
+            app.prompt_history_move_up();
+        } else {
+            app.prompt_history_move_down();
+        }
+        return;
+    }
 
     if app.show_log_overlay {
         if scroll_up {
@@ -802,6 +852,9 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
 }
 
 fn handle_mouse_hscroll(app: &mut AppState, _col: u16, _row: u16, scroll_left: bool) {
+    if app.show_prompt_history_overlay {
+        return;
+    }
     if !app.show_log_overlay {
         return;
     }

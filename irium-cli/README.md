@@ -54,11 +54,14 @@ The app scans the current working directory and opens a three-stage TUI:
 - `t`: toggle `Suggestions` / `Style` panel
 - `r`: refresh AI suggestions (manual regenerate)
 - `m`: open/close Suggestions settings popup
+- `p`: open/close prompt history picker (Naming stage)
 - `1` / `2` / `3` in Suggestions pane: set global option index
 - `!` / `@` / `#` in Suggestions pane: alternate global option hotkeys
 - `Left` / `Right` in `Style`: cycle style values
 - `/`: focus natural prompt input
 - `Enter` in prompt input: run a fresh AI suggestion generation using your prompt
+- `Up` / `Down` in prompt input: navigate previously submitted prompts
+- In prompt history picker: `Up`/`Down` navigate, `Enter` load prompt into input
 - In Suggestions settings popup:
   - `Tab` / `Shift+Tab`: move between settings fields/actions
   - `d`: discover OpenRouter models
@@ -76,5 +79,6 @@ The app scans the current working directory and opens a three-stage TUI:
 - OpenRouter is the only provider exposed in v1.
 - Model discovery uses OpenRouter endpoints and may return partial results depending on auth/network.
 - API key and selected model are persisted in local config (`~/.config/irium/config.toml` on macOS/Linux) with best-effort secure permissions.
+- Prompt history is persisted separately in local data storage (`.../irium/prompt_history.json`) and is not stored in `config.toml`.
 - Undo history is in-memory for the current session only.
 - Mouse support is basic (`click`, `scroll`) and does not include range multi-select gestures.

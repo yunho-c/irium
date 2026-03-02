@@ -108,6 +108,7 @@ fn split_name_words(name: &str) -> Vec<String> {
 
 fn apply_length(mut words: Vec<String>, length: NameLength) -> Vec<String> {
     let max_words = match length {
+        NameLength::None => words.len(),
         NameLength::Long => 8,
         NameLength::Medium => 4,
         NameLength::Short => 2,
@@ -115,6 +116,7 @@ fn apply_length(mut words: Vec<String>, length: NameLength) -> Vec<String> {
     words.truncate(max_words);
 
     let max_chars = match length {
+        NameLength::None => usize::MAX,
         NameLength::Long => 48,
         NameLength::Medium => 24,
         NameLength::Short => 12,
@@ -154,6 +156,7 @@ fn apply_capitalization(words: &[String], capitalization: Capitalization) -> Vec
     words
         .iter()
         .map(|word| match capitalization {
+            Capitalization::None => word.clone(),
             Capitalization::Lower => word.to_lowercase(),
             Capitalization::Upper => word.to_uppercase(),
             Capitalization::Title => {
