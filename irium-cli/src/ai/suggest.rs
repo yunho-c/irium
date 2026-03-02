@@ -37,6 +37,7 @@ pub async fn generate_filename_suggestions(
     api_key: &str,
     model_id: &str,
     contexts: &[AnalyzedFileContext],
+    user_prompt: Option<&str>,
 ) -> Result<HashMap<PathBuf, [String; 3]>, String> {
     let client: openrouter::Client = openrouter::Client::new(api_key)
         .map_err(|e| format!("OpenRouter client initialization failed: {e}"))?;
@@ -69,17 +70,36 @@ pub async fn generate_filename_suggestions(
     let payload_json = serde_json::to_string_pretty(&payload)
         .map_err(|e| format!("Failed to build prompt payload: {e}"))?;
 
-    let prompt = format!(
-        "Return JSON with shape:\n\
-         {{\"files\":[{{\"path\":\"<exact path>\",\"suggestions\":[\"name1\",\"name2\",\"name3\"]}}]}}\n\
-         Requirements:\n\
-         - Include every input file path exactly once.\n\
-         - Keep filenames concise, human-readable, and deterministic from context.\n\
-         - No directory separators or absolute paths inside suggestions.\n\
-         - Prefer preserving semantic meaning from content and metadata.\n\
-         Input:\n{}",
-        payload_json
-    );
+    let user_guidance = user_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    let prompt = if user_guidance.is_empty() {
+        format!(
+            "Return JSON with shape:\n\
+             {{\"files\":[{{\"path\":\"<exact path>\",\"suggestions\":[\"name1\",\"name2\",\"name3\"]}}]}}\n\
+             Requirements:\n\
+             - Include every input file path exactly once.\n\
+             - Keep filenames concise, human-readable, and deterministic from context.\n\
+             - No directory separators or absolute paths inside suggestions.\n\
+             - Prefer preserving semantic meaning from content and metadata.\n\
+             Input:\n{}",
+            payload_json
+        )
+    } else {
+        format!(
+            "Return JSON with shape:\n\
+             {{\"files\":[{{\"path\":\"<exact path>\",\"suggestions\":[\"name1\",\"name2\",\"name3\"]}}]}}\n\
+             Requirements:\n\
+             - Include every input file path exactly once.\n\
+             - Keep filenames concise, human-readable, and deterministic from context.\n\
+             - No directory separators or absolute paths inside suggestions.\n\
+             - Prefer preserving semantic meaning from content and metadata.\n\
+             - Apply this user request while preserving safety and filename validity: {}\n\
+             Input:\n{}",
+            user_guidance, payload_json
+        )
+    };
 
     let raw = agent
         .prompt(prompt)

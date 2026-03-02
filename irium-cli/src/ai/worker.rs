@@ -16,6 +16,7 @@ pub enum AiWorkerCommand {
         api_key: String,
         model_id: String,
         paths: Vec<PathBuf>,
+        user_prompt: Option<String>,
     },
     DiscoverModels {
         request_id: u64,
@@ -109,6 +110,7 @@ fn worker_loop(cmd_rx: Receiver<AiWorkerCommand>, evt_tx: Sender<AiWorkerEvent>)
                 api_key,
                 model_id,
                 paths,
+                user_prompt,
             } => {
                 let _ = evt_tx.send(AiWorkerEvent::ProgressUpdate {
                     request_id,
@@ -128,6 +130,7 @@ fn worker_loop(cmd_rx: Receiver<AiWorkerCommand>, evt_tx: Sender<AiWorkerEvent>)
                     &api_key,
                     &model_id,
                     &analyzed.files,
+                    user_prompt.as_deref(),
                 )) {
                     Ok(per_path_options) => {
                         let _ = evt_tx.send(AiWorkerEvent::SuggestionsReady {

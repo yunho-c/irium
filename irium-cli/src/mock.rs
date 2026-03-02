@@ -206,70 +206,6 @@ pub fn format_name(base_name: &str, extension: Option<&str>, style: &StyleOption
     out
 }
 
-pub fn parse_style_command(input: &str, style: &mut StyleOptions) -> usize {
-    let mut applied = 0usize;
-    for raw in input.split_whitespace() {
-        let token = raw.trim().to_lowercase();
-        match token.as_str() {
-            "short" => {
-                style.length = NameLength::Short;
-                applied += 1;
-            }
-            "medium" => {
-                style.length = NameLength::Medium;
-                applied += 1;
-            }
-            "long" => {
-                style.length = NameLength::Long;
-                applied += 1;
-            }
-            "lower" | "lowercase" => {
-                style.capitalization = Capitalization::Lower;
-                applied += 1;
-            }
-            "upper" | "uppercase" => {
-                style.capitalization = Capitalization::Upper;
-                applied += 1;
-            }
-            "title" => {
-                style.capitalization = Capitalization::Title;
-                applied += 1;
-            }
-            "space" | "spaces" => {
-                style.separator = Separator::Space;
-                applied += 1;
-            }
-            "dash" | "dashes" | "kebab" => {
-                style.separator = Separator::Dash;
-                applied += 1;
-            }
-            "underscore" | "snake" => {
-                style.separator = Separator::Underscore;
-                applied += 1;
-            }
-            "keep-ext" | "keepext" => {
-                style.keep_extension = true;
-                applied += 1;
-            }
-            "drop-ext" | "no-ext" => {
-                style.keep_extension = false;
-                applied += 1;
-            }
-            "no-colon" | "no-colons" => {
-                style.strip_colons = true;
-                applied += 1;
-            }
-            "allow-colon" | "colons" => {
-                style.strip_colons = false;
-                applied += 1;
-            }
-            _ => {}
-        }
-    }
-
-    applied
-}
-
 pub fn default_suggestion_labels() -> Vec<String> {
     vec![
         "Option 1".to_string(),
@@ -349,23 +285,5 @@ mod tests {
         let formatted = format_name("가나다라마바사-테스트🙂파일", Some("txt"), &style);
         assert!(formatted.ends_with(".txt"));
         assert!(formatted.chars().count() <= 16);
-    }
-
-    #[test]
-    fn parse_style_command_recognizes_tokens() {
-        let mut style = StyleOptions::default();
-        let count = parse_style_command("short upper underscore no-colon", &mut style);
-        assert_eq!(count, 4);
-        assert_eq!(style.length, NameLength::Short);
-        assert_eq!(style.capitalization, Capitalization::Upper);
-        assert_eq!(style.separator, Separator::Underscore);
-        assert!(style.strip_colons);
-    }
-
-    #[test]
-    fn parse_style_command_ignores_unknown_tokens() {
-        let mut style = StyleOptions::default();
-        let count = parse_style_command("unknown-token", &mut style);
-        assert_eq!(count, 0);
     }
 }

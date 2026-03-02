@@ -29,8 +29,12 @@ pub fn map_event(app: &AppState, event: Event) -> Vec<Action> {
                     vec![Action::MouseScrollRight(mouse.column, mouse.row)]
                 }
                 MouseEventKind::ScrollUp => vec![Action::MouseScrollUp(mouse.column, mouse.row)],
-                MouseEventKind::ScrollDown => vec![Action::MouseScrollDown(mouse.column, mouse.row)],
-                MouseEventKind::ScrollLeft => vec![Action::MouseScrollLeft(mouse.column, mouse.row)],
+                MouseEventKind::ScrollDown => {
+                    vec![Action::MouseScrollDown(mouse.column, mouse.row)]
+                }
+                MouseEventKind::ScrollLeft => {
+                    vec![Action::MouseScrollLeft(mouse.column, mouse.row)]
+                }
                 MouseEventKind::ScrollRight => {
                     vec![Action::MouseScrollRight(mouse.column, mouse.row)]
                 }

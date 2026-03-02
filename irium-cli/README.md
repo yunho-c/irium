@@ -57,8 +57,8 @@ The app scans the current working directory and opens a three-stage TUI:
 - `1` / `2` / `3` in Suggestions pane: set global option index
 - `!` / `@` / `#` in Suggestions pane: alternate global option hotkeys
 - `Left` / `Right` in `Style`: cycle style values
-- `/`: focus natural command input
-- `Enter` in command input: apply deterministic tokens (`short`, `long`, `title`, `lower`, `upper`, `dash`, `underscore`, `space`, `no-colon`, `keep-ext`)
+- `/`: focus natural prompt input
+- `Enter` in prompt input: run a fresh AI suggestion generation using your prompt
 - In Suggestions settings popup:
   - `Tab` / `Shift+Tab`: move between settings fields/actions
   - `d`: discover OpenRouter models

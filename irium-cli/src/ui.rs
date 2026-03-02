@@ -1126,14 +1126,11 @@ fn draw_naming_ai_settings_popup(frame: &mut Frame<'_>, app: &mut AppState, area
 }
 
 fn draw_command_box(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let block = focus_block(
-        "Natural style command (/)",
-        app.focus == FocusPane::NamingCommand,
-    );
+    let block = focus_block("Natural prompt (/)", app.focus == FocusPane::NamingCommand);
     frame.render_widget(block, area);
     let inner = inner_rect(area);
 
-    let placeholder = "Example: short title dash no-colon keep-ext";
+    let placeholder = "Example: Make names concise, title case, include project + date";
     let mut content = if app.command_input.is_empty() {
         Span::styled(placeholder, Theme::muted_text())
     } else {

@@ -112,7 +112,7 @@ impl AppState {
                     "Files: arrows move | Space select | A select-all | p settings | v toggle category-filter",
                 ),
                 Line::from(
-                    "Naming: r refresh AI | m suggestions settings | 1-3 row option | / style command",
+                    "Naming: r refresh AI | m suggestions settings | 1-3 row option | / prompt",
                 ),
                 Line::from("Apply: Enter submit+exit (simulated) | Ctrl+Enter submit+stay"),
             ],
@@ -1391,7 +1391,7 @@ impl AppState {
 
     pub fn trigger_naming_suggestions_refresh_if_configured(&mut self) {
         if self.ai_settings_has_minimum_config() {
-            self.trigger_naming_suggestions_refresh();
+            self.trigger_naming_suggestions_refresh_with_prompt(None);
         } else {
             self.naming_ai_status = NamingAiStatus::NeedsConfig;
             self.naming_ai_error = None;
@@ -1399,6 +1399,10 @@ impl AppState {
     }
 
     pub fn trigger_naming_suggestions_refresh(&mut self) {
+        self.trigger_naming_suggestions_refresh_with_prompt(None);
+    }
+
+    pub fn trigger_naming_suggestions_refresh_with_prompt(&mut self, user_prompt: Option<String>) {
         if !self.ai_settings_has_minimum_config() {
             self.naming_ai_status = NamingAiStatus::NeedsConfig;
             self.push_toast(
@@ -1437,6 +1441,7 @@ impl AppState {
                 api_key,
                 model_id,
                 paths,
+                user_prompt,
             });
         } else {
             self.naming_ai_status = NamingAiStatus::Error;
@@ -1768,22 +1773,19 @@ impl AppState {
     }
 
     pub fn apply_command_input(&mut self) {
-        let command = self.command_input.clone();
-        let changed = mock::parse_style_command(&command, &mut self.style);
+        let command = self.command_input.trim().to_string();
         self.command_input.clear();
         self.mode = InputMode::Normal;
-        if changed == 0 {
+
+        if command.is_empty() {
             self.push_toast(
                 ToastLevel::Warning,
-                "No known style token found. Try: short title dash keep-ext",
+                "Prompt is empty. Enter a naming instruction and submit.",
             );
             return;
         }
-        self.recompute_proposals();
-        self.push_toast(
-            ToastLevel::Success,
-            format!("Applied {changed} style command(s)"),
-        );
+
+        self.trigger_naming_suggestions_refresh_with_prompt(Some(command));
     }
 
     pub fn assign_group(&mut self, group_id: u8) {
