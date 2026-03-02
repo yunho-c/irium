@@ -2,10 +2,12 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     hash::Hash,
     path::PathBuf,
+    time::Instant,
 };
 
 use ratatui::text::Line;
 use ratatui_interact::{state::FocusManager, traits::ClickRegionRegistry};
+use tachyonfx::Effect;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Stage {
@@ -506,4 +508,6 @@ pub struct AppState {
     pub category_match_dirs: HashSet<PathBuf>,
     pub scope_files_focus_nodes: HashSet<usize>,
     pub scope_files_drag: Option<FilesDragState>,
+    pub title_startup_fx: Option<Effect>,
+    pub title_fx_last_frame: Option<Instant>,
 }

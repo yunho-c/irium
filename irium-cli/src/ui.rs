@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -76,16 +78,42 @@ fn draw_stage_tabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(title_width), Constraint::Min(0)])
         .split(area);
+    let title_color = if app.title_startup_fx.is_some() {
+        Theme::warning()
+    } else {
+        Theme::text()
+    };
     let title_line = Line::from(vec![
         Span::styled(
             "IRIUM",
-            Style::default()
-                .fg(Theme::text())
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(title_color).add_modifier(Modifier::BOLD),
         ),
-        Span::raw(": intelligent renamer"),
+        Span::styled(": intelligent renamer", Style::default().fg(title_color)),
     ]);
     frame.render_widget(Paragraph::new(title_line), layout[0]);
+    if let Some(effect) = app.title_startup_fx.as_mut() {
+        let now = Instant::now();
+        let delta = app
+            .title_fx_last_frame
+            .map(|last| now.saturating_duration_since(last))
+            .unwrap_or_else(|| Duration::from_millis(0));
+        app.title_fx_last_frame = Some(now);
+        effect.process(delta.into(), frame.buffer_mut(), layout[0]);
+        if effect.done() {
+            app.title_startup_fx = None;
+            app.title_fx_last_frame = None;
+            let title_line = Line::from(vec![
+                Span::styled(
+                    "IRIUM",
+                    Style::default()
+                        .fg(Theme::text())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(": intelligent renamer", Style::default().fg(Theme::text())),
+            ]);
+            frame.render_widget(Paragraph::new(title_line), layout[0]);
+        }
+    }
 
     if layout[1].width == 0 {
         return;

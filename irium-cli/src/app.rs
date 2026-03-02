@@ -1,10 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use ratatui::text::Line;
+use tachyonfx::{Interpolation, fx, pattern::SweepPattern};
 
 use crate::{
     fs_scan::{self, FsEntry},
@@ -84,6 +85,15 @@ impl AppState {
             category_match_dirs: HashSet::new(),
             scope_files_focus_nodes: HashSet::new(),
             scope_files_drag: None,
+            title_startup_fx: Some(
+                fx::hsl_shift(
+                    Some([120.0, 25.0, 25.0]),
+                    Some([-40.0, -50.0, -50.0]),
+                    (1000, Interpolation::Linear),
+                )
+                .with_pattern(SweepPattern::left_to_right(80)),
+            ),
+            title_fx_last_frame: Some(Instant::now()),
         };
 
         app.sync_focus_manager();
