@@ -12,3 +12,5 @@ ratatui = "0.30"
 crossterm = "0.29"
 ratatui-interact = "0.4.2"
 rig-core = "0.31.0"
+kreuzberg = { version = "4.4.1", features = ["pdf", "excel", "office", "archives"] }
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
