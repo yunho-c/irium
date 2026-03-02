@@ -741,17 +741,14 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let block = focus_block("Suggestions + Style", app.focus == FocusPane::NamingRight);
-    frame.render_widget(block, area);
-    let inner = inner_rect(area);
-    if inner.height < 3 {
+    if area.height < 3 || area.width < 6 {
         return;
     }
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
-        .split(inner);
+        .split(area);
 
     frame.render_widget(
         Block::default()
