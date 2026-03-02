@@ -1383,8 +1383,19 @@ fn draw_log_overlay(frame: &mut Frame<'_>, app: &mut AppState) {
     let end = (start + visible).min(app.logs.len());
     let col_start = app.log_col_scroll;
     let mut items = Vec::new();
-    for line in app.logs.iter().skip(start).take(end - start) {
-        items.push(ListItem::new(slice_char_start(line, col_start)).style(Theme::panel()));
+    for (offset, line) in app.logs.iter().skip(start).take(end - start).enumerate() {
+        let log_index = start + offset;
+        let y = inner.y + offset as u16;
+        let decorated = format!("\u{f0c5} {}", line);
+        let visible_line = slice_char_start(&decorated, col_start).to_string();
+        items.push(ListItem::new(visible_line).style(Theme::panel()));
+        if col_start == 0 && inner.width > 0 {
+            let icon_width = inner.width.min(2);
+            app.click_regions.register(
+                Rect::new(inner.x, y, icon_width, 1),
+                ClickTarget::LogCopyLine(log_index),
+            );
+        }
     }
     frame.render_widget(List::new(items), inner);
 }

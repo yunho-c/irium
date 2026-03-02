@@ -410,6 +410,7 @@ impl FileTree {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ClickTarget {
     LogOverlay,
+    LogCopyLine(usize),
     StageTab(Stage),
     ScopeTab(ScopeTab),
     ScopeFileRow(usize),

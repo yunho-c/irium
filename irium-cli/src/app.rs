@@ -5,6 +5,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+use arboard::Clipboard;
 use ratatui::text::Line;
 use tachyonfx::{Interpolation, fx, pattern::SweepPattern};
 
@@ -285,6 +286,19 @@ impl AppState {
         }
     }
 
+    pub fn click_target_at(&self, col: u16, row: u16) -> Option<crate::model::ClickTarget> {
+        self.click_regions.handle_click(col, row).cloned()
+    }
+
+    pub fn click_target_at_topmost(&self, col: u16, row: u16) -> Option<crate::model::ClickTarget> {
+        self.click_regions
+            .regions()
+            .iter()
+            .rev()
+            .find(|region| region.contains(col, row))
+            .map(|region| region.data.clone())
+    }
+
     pub fn update_log_viewport(&mut self, height: usize, width: usize) {
         self.log_view_height = height;
         self.log_view_width = width;
@@ -308,6 +322,20 @@ impl AppState {
     pub fn scroll_log_right(&mut self) {
         let max_start = self.max_log_col_start();
         self.log_col_scroll = self.log_col_scroll.saturating_add(1).min(max_start);
+    }
+
+    pub fn copy_log_line(&mut self, index: usize) {
+        let Some(line) = self.logs.get(index).cloned() else {
+            return;
+        };
+
+        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(line)) {
+            Ok(()) => self.push_toast(ToastLevel::Success, "Copied log line"),
+            Err(error) => self.push_toast(
+                ToastLevel::Error,
+                format!("Failed to copy log line: {error}"),
+            ),
+        }
     }
 
     pub fn push_toast(&mut self, level: ToastLevel, message: impl Into<String>) {

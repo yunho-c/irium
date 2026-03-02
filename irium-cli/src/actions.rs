@@ -366,9 +366,12 @@ fn handle_commit(app: &mut AppState) {
 
 fn handle_mouse_down(app: &mut AppState, col: u16, row: u16) {
     if app.show_log_overlay {
+        if let Some(target) = app.click_target_at_topmost(col, row) {
+            handle_click_target(app, target);
+        }
         return;
     }
-    let Some(target) = app.click_regions.handle_click(col, row).cloned() else {
+    let Some(target) = app.click_target_at(col, row) else {
         app.scope_files_drag = None;
         app.clear_scope_file_focus_nodes();
         return;
@@ -429,7 +432,7 @@ fn handle_mouse_drag(app: &mut AppState, col: u16, row: u16) {
         return;
     };
 
-    let target = app.click_regions.handle_click(col, row).cloned();
+    let target = app.click_target_at(col, row);
     match (&mut drag.mode, target) {
         (
             FilesDragMode::CheckboxSelect {
@@ -612,6 +615,7 @@ fn handle_click_target(app: &mut AppState, target: ClickTarget) {
             app.set_focus(FocusPane::ApplyHistory);
             app.history_cursor = index;
         }
+        ClickTarget::LogCopyLine(index) => app.copy_log_line(index),
         ClickTarget::LogOverlay => {}
     }
 }
@@ -628,7 +632,7 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
         return;
     }
 
-    let maybe_target = app.click_regions.handle_click(col, row).cloned();
+    let maybe_target = app.click_target_at(col, row);
 
     let Some(target) = maybe_target else {
         if scroll_up {
@@ -792,6 +796,7 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
             app.set_focus(FocusPane::ApplyHistory);
             app.history_cursor = scroll_index(app.history_cursor, app.undo_history.len(), delta);
         }
+        ClickTarget::LogCopyLine(_) => {}
         ClickTarget::LogOverlay => {}
     }
 }
