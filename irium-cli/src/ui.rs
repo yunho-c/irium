@@ -120,29 +120,11 @@ fn draw_subtabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     match app.stage {
         Stage::Scope => {}
         Stage::Naming => {
-            let titles: Vec<Line<'_>> = NamingTab::ALL
-                .iter()
-                .map(|tab| Line::from(tab.title()))
-                .collect();
-            let selected = NamingTab::ALL
-                .iter()
-                .position(|tab| *tab == app.naming_tab)
-                .unwrap_or(0);
             frame.render_widget(
-                Tabs::new(titles)
-                    .style(Theme::muted_text())
-                    .highlight_style(Theme::accent_text())
-                    .select(selected)
-                    .divider("  "),
+                Paragraph::new("Right pane: Suggestions (top) + Style Controls (bottom)")
+                    .style(Theme::muted_text()),
                 area,
             );
-            for (idx, rect) in segment_rects(area, NamingTab::ALL.len())
-                .into_iter()
-                .enumerate()
-            {
-                app.click_regions
-                    .register(rect, ClickTarget::NamingTab(NamingTab::ALL[idx]));
-            }
         }
         Stage::Apply => {
             let text = Paragraph::new("Review simulated changes and session undo history")
@@ -706,7 +688,7 @@ fn draw_naming(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let block = focus_block("Current -> Proposed", app.focus == FocusPane::NamingTable);
+    let block = focus_block("Preview", app.focus == FocusPane::NamingTable);
     frame.render_widget(block, area);
     let inner = inner_rect(area);
 
@@ -759,75 +741,97 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let title = match app.naming_tab {
-        NamingTab::Suggestions => "Suggestions",
-        NamingTab::Style => "Style Controls",
-    };
-    let block = focus_block(title, app.focus == FocusPane::NamingRight);
+    let block = focus_block("Suggestions + Style", app.focus == FocusPane::NamingRight);
     frame.render_widget(block, area);
     let inner = inner_rect(area);
+    if inner.height < 3 {
+        return;
+    }
 
-    match app.naming_tab {
-        NamingTab::Suggestions => {
-            let mut items = Vec::new();
-            for (idx, item) in app.suggestions.iter().enumerate() {
-                let style = if idx == app.suggestion_cursor {
-                    Theme::selected_row()
-                } else {
-                    Theme::panel()
-                };
-                items.push(ListItem::new(item.label.clone()).style(style));
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
+        .split(inner);
 
-                let y = inner.y + idx as u16;
-                if y < inner.y + inner.height {
-                    app.click_regions.register(
-                        Rect::new(inner.x, y, inner.width, 1),
-                        ClickTarget::NamingSuggestion(idx),
-                    );
-                }
-            }
-            frame.render_widget(List::new(items), inner);
-        }
-        NamingTab::Style => {
-            let rows = vec![
-                format!("Length: {}", format_length(app.style.length)),
-                format!("Capitalization: {}", format_caps(app.style.capitalization)),
-                format!("Separator: {}", format_separator(app.style.separator)),
-                format!(
-                    "Keep extension: {}",
-                    if app.style.keep_extension {
-                        "yes"
-                    } else {
-                        "no"
-                    }
-                ),
-                format!(
-                    "Strip colons: {}",
-                    if app.style.strip_colons { "yes" } else { "no" }
-                ),
-            ];
+    frame.render_widget(
+        Block::default()
+            .title("Suggestions")
+            .borders(Borders::ALL)
+            .border_style(if app.focus == FocusPane::NamingRight
+                && app.naming_tab == NamingTab::Suggestions
+            {
+                Theme::accent_text()
+            } else {
+                Theme::muted_text()
+            }),
+        sections[0],
+    );
+    let sugg_inner = inner_rect(sections[0]);
+    let mut suggestion_items = Vec::new();
+    for (idx, item) in app.suggestions.iter().enumerate() {
+        let style = if app.naming_tab == NamingTab::Suggestions && idx == app.suggestion_cursor {
+            Theme::selected_row()
+        } else {
+            Theme::panel()
+        };
+        suggestion_items.push(ListItem::new(item.label.clone()).style(style));
 
-            let mut items = Vec::new();
-            for (idx, line) in rows.into_iter().enumerate() {
-                let style = if idx == app.style_cursor {
-                    Theme::selected_row()
-                } else {
-                    Theme::panel()
-                };
-                items.push(ListItem::new(line).style(style));
-
-                let y = inner.y + idx as u16;
-                if y < inner.y + inner.height {
-                    app.click_regions.register(
-                        Rect::new(inner.x, y, inner.width, 1),
-                        ClickTarget::NamingStyleRow(idx),
-                    );
-                }
-            }
-
-            frame.render_widget(List::new(items), inner);
+        let y = sugg_inner.y + idx as u16;
+        if y < sugg_inner.y + sugg_inner.height {
+            app.click_regions.register(
+                Rect::new(sugg_inner.x, y, sugg_inner.width, 1),
+                ClickTarget::NamingSuggestion(idx),
+            );
         }
     }
+    frame.render_widget(List::new(suggestion_items), sugg_inner);
+
+    frame.render_widget(
+        Block::default()
+            .title("Style Controls")
+            .borders(Borders::ALL)
+            .border_style(
+                if app.focus == FocusPane::NamingRight && app.naming_tab == NamingTab::Style {
+                    Theme::accent_text()
+                } else {
+                    Theme::muted_text()
+                },
+            ),
+        sections[1],
+    );
+    let style_inner = inner_rect(sections[1]);
+    let style_rows = vec![
+        format!("Length: {}", format_length(app.style.length)),
+        format!("Capitalization: {}", format_caps(app.style.capitalization)),
+        format!("Separator: {}", format_separator(app.style.separator)),
+        format!(
+            "Keep extension: {}",
+            if app.style.keep_extension { "yes" } else { "no" }
+        ),
+        format!(
+            "Strip colons: {}",
+            if app.style.strip_colons { "yes" } else { "no" }
+        ),
+    ];
+
+    let mut style_items = Vec::new();
+    for (idx, line) in style_rows.into_iter().enumerate() {
+        let style = if app.naming_tab == NamingTab::Style && idx == app.style_cursor {
+            Theme::selected_row()
+        } else {
+            Theme::panel()
+        };
+        style_items.push(ListItem::new(line).style(style));
+
+        let y = style_inner.y + idx as u16;
+        if y < style_inner.y + style_inner.height {
+            app.click_regions.register(
+                Rect::new(style_inner.x, y, style_inner.width, 1),
+                ClickTarget::NamingStyleRow(idx),
+            );
+        }
+    }
+    frame.render_widget(List::new(style_items), style_inner);
 }
 
 fn draw_command_box(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {

@@ -375,7 +375,6 @@ fn handle_click_target(app: &mut AppState, target: ClickTarget) {
     match target {
         ClickTarget::StageTab(stage) => app.set_stage(stage),
         ClickTarget::ScopeTab(tab) => app.set_scope_tab(tab),
-        ClickTarget::NamingTab(tab) => app.naming_tab = tab,
         ClickTarget::ScopeFileRow(index) => {
             app.set_scope_tab(ScopeTab::Files);
             app.tree.cursor = index;
@@ -477,7 +476,7 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
     };
 
     match target {
-        ClickTarget::StageTab(_) | ClickTarget::ScopeTab(_) | ClickTarget::NamingTab(_) => {}
+        ClickTarget::StageTab(_) | ClickTarget::ScopeTab(_) => {}
         ClickTarget::ScopeFileRow(_) => {
             app.set_scope_tab(ScopeTab::Files);
             app.normalize_scope_files_cursor();

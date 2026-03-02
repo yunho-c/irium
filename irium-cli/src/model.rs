@@ -90,15 +90,6 @@ pub enum NamingTab {
 }
 
 impl NamingTab {
-    pub const ALL: [NamingTab; 2] = [NamingTab::Suggestions, NamingTab::Style];
-
-    pub fn title(self) -> &'static str {
-        match self {
-            NamingTab::Suggestions => "Suggestions",
-            NamingTab::Style => "Style",
-        }
-    }
-
     pub fn next(self) -> Self {
         match self {
             NamingTab::Suggestions => NamingTab::Style,
@@ -416,7 +407,6 @@ impl FileTree {
 pub enum ClickTarget {
     StageTab(Stage),
     ScopeTab(ScopeTab),
-    NamingTab(NamingTab),
     ScopeFileRow(usize),
     ScopeFileCheckbox(usize),
     ScopeFilesSettingsButton,
