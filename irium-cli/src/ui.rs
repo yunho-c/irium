@@ -1364,6 +1364,8 @@ fn draw_log_overlay(frame: &mut Frame<'_>, app: &mut AppState) {
     if inner.height == 0 || inner.width == 0 {
         return;
     }
+    app.click_regions.register(inner, ClickTarget::LogOverlay);
+    app.update_log_viewport(inner.height as usize, inner.width as usize);
 
     if app.logs.is_empty() {
         frame.render_widget(
@@ -1375,16 +1377,27 @@ fn draw_log_overlay(frame: &mut Frame<'_>, app: &mut AppState) {
         return;
     }
 
-    let visible = inner.height as usize;
-    app.log_view_height = visible;
+    let visible = app.log_view_height.max(1);
     let max_start = app.logs.len().saturating_sub(visible);
     let start = app.log_scroll.min(max_start);
     let end = (start + visible).min(app.logs.len());
+    let col_start = app.log_col_scroll;
     let mut items = Vec::new();
     for line in app.logs.iter().skip(start).take(end - start) {
-        items.push(ListItem::new(line.as_str()).style(Theme::panel()));
+        items.push(ListItem::new(slice_char_start(line, col_start)).style(Theme::panel()));
     }
     frame.render_widget(List::new(items), inner);
+}
+
+fn slice_char_start(line: &str, start: usize) -> &str {
+    if start == 0 {
+        return line;
+    }
+    if let Some((byte_idx, _)) = line.char_indices().nth(start) {
+        &line[byte_idx..]
+    } else {
+        ""
+    }
 }
 
 fn format_length(length: NameLength) -> &'static str {

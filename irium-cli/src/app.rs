@@ -97,6 +97,8 @@ impl AppState {
             show_log_overlay: false,
             log_scroll: 0,
             log_view_height: 0,
+            log_col_scroll: 0,
+            log_view_width: 0,
             undo_history: Vec::new(),
             apply_cursor: 0,
             history_cursor: 0,
@@ -278,24 +280,34 @@ impl AppState {
     pub fn toggle_log_overlay(&mut self) {
         self.show_log_overlay = !self.show_log_overlay;
         if self.show_log_overlay {
+            self.log_col_scroll = 0;
             self.scroll_logs_to_bottom();
         }
     }
 
+    pub fn update_log_viewport(&mut self, height: usize, width: usize) {
+        self.log_view_height = height;
+        self.log_view_width = width;
+        self.clamp_log_scroll_bounds();
+    }
+
     pub fn scroll_log_up(&mut self) {
-        let max_start = self
-            .logs
-            .len()
-            .saturating_sub(self.log_view_height.max(1));
+        let max_start = self.max_log_row_start();
         self.log_scroll = self.log_scroll.min(max_start).saturating_sub(1);
     }
 
     pub fn scroll_log_down(&mut self) {
-        let max_start = self
-            .logs
-            .len()
-            .saturating_sub(self.log_view_height.max(1));
+        let max_start = self.max_log_row_start();
         self.log_scroll = self.log_scroll.saturating_add(1).min(max_start);
+    }
+
+    pub fn scroll_log_left(&mut self) {
+        self.log_col_scroll = self.log_col_scroll.saturating_sub(1);
+    }
+
+    pub fn scroll_log_right(&mut self) {
+        let max_start = self.max_log_col_start();
+        self.log_col_scroll = self.log_col_scroll.saturating_add(1).min(max_start);
     }
 
     pub fn push_toast(&mut self, level: ToastLevel, message: impl Into<String>) {
@@ -1492,6 +1504,14 @@ impl AppState {
                         ToastLevel::Warning,
                         format!("AI finished with {} warning(s)", warnings.len()),
                     );
+                    let total = warnings.len();
+                    for (idx, warning) in warnings.into_iter().enumerate() {
+                        let one_line = warning.replace('\n', " ");
+                        self.append_log(
+                            "WARN",
+                            &format!("AI warning {}/{}: {}", idx + 1, total, one_line),
+                        );
+                    }
                 }
             }
             AiWorkerEvent::AiError {
@@ -1538,15 +1558,31 @@ impl AppState {
             let extra = self.logs.len() - 1000;
             self.logs.drain(0..extra);
         }
+        self.clamp_log_scroll_bounds();
         self.scroll_logs_to_bottom();
     }
 
     fn scroll_logs_to_bottom(&mut self) {
-        let max_start = self
-            .logs
-            .len()
-            .saturating_sub(self.log_view_height.max(1));
+        let max_start = self.max_log_row_start();
         self.log_scroll = max_start;
+    }
+
+    fn max_log_row_start(&self) -> usize {
+        self.logs.len().saturating_sub(self.log_view_height.max(1))
+    }
+
+    fn max_log_col_start(&self) -> usize {
+        self.logs
+            .iter()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0)
+            .saturating_sub(self.log_view_width.max(1))
+    }
+
+    fn clamp_log_scroll_bounds(&mut self) {
+        self.log_scroll = self.log_scroll.min(self.max_log_row_start());
+        self.log_col_scroll = self.log_col_scroll.min(self.max_log_col_start());
     }
 
     pub fn filtered_ai_models(&self) -> Vec<(usize, crate::ai::ModelListItem)> {

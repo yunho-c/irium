@@ -12,6 +12,8 @@ pub enum Action {
     ToggleLogOverlay,
     ScrollLogUp,
     ScrollLogDown,
+    ScrollLogLeft,
+    ScrollLogRight,
     ToggleHelp,
     NextStage,
     PrevStage,
@@ -62,6 +64,8 @@ pub enum Action {
     MouseUp(u16, u16),
     MouseScrollUp(u16, u16),
     MouseScrollDown(u16, u16),
+    MouseScrollLeft(u16, u16),
+    MouseScrollRight(u16, u16),
 }
 
 pub fn reduce(app: &mut AppState, action: Action) {
@@ -71,6 +75,8 @@ pub fn reduce(app: &mut AppState, action: Action) {
         Action::ToggleLogOverlay => app.toggle_log_overlay(),
         Action::ScrollLogUp => app.scroll_log_up(),
         Action::ScrollLogDown => app.scroll_log_down(),
+        Action::ScrollLogLeft => app.scroll_log_left(),
+        Action::ScrollLogRight => app.scroll_log_right(),
         Action::ToggleHelp => app.show_help = !app.show_help,
         Action::NextStage => app.set_stage(app.stage.next()),
         Action::PrevStage => app.set_stage(app.stage.prev()),
@@ -250,6 +256,8 @@ pub fn reduce(app: &mut AppState, action: Action) {
         Action::MouseUp(col, row) => handle_mouse_up(app, col, row),
         Action::MouseScrollUp(col, row) => handle_mouse_scroll(app, col, row, true),
         Action::MouseScrollDown(col, row) => handle_mouse_scroll(app, col, row, false),
+        Action::MouseScrollLeft(col, row) => handle_mouse_hscroll(app, col, row, true),
+        Action::MouseScrollRight(col, row) => handle_mouse_hscroll(app, col, row, false),
     }
 }
 
@@ -357,6 +365,9 @@ fn handle_commit(app: &mut AppState) {
 }
 
 fn handle_mouse_down(app: &mut AppState, col: u16, row: u16) {
+    if app.show_log_overlay {
+        return;
+    }
     let Some(target) = app.click_regions.handle_click(col, row).cloned() else {
         app.scope_files_drag = None;
         app.clear_scope_file_focus_nodes();
@@ -411,6 +422,9 @@ fn handle_mouse_down(app: &mut AppState, col: u16, row: u16) {
 }
 
 fn handle_mouse_drag(app: &mut AppState, col: u16, row: u16) {
+    if app.show_log_overlay {
+        return;
+    }
     let Some(mut drag) = app.scope_files_drag.take() else {
         return;
     };
@@ -455,6 +469,9 @@ fn handle_mouse_drag(app: &mut AppState, col: u16, row: u16) {
 }
 
 fn handle_mouse_up(app: &mut AppState, _col: u16, _row: u16) {
+    if app.show_log_overlay {
+        return;
+    }
     let Some(drag) = app.scope_files_drag.take() else {
         return;
     };
@@ -595,11 +612,22 @@ fn handle_click_target(app: &mut AppState, target: ClickTarget) {
             app.set_focus(FocusPane::ApplyHistory);
             app.history_cursor = index;
         }
+        ClickTarget::LogOverlay => {}
     }
 }
 
 fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) {
     let delta: isize = if scroll_up { -1 } else { 1 };
+
+    if app.show_log_overlay {
+        if scroll_up {
+            app.scroll_log_up();
+        } else {
+            app.scroll_log_down();
+        }
+        return;
+    }
+
     let maybe_target = app.click_regions.handle_click(col, row).cloned();
 
     let Some(target) = maybe_target else {
@@ -764,6 +792,19 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
             app.set_focus(FocusPane::ApplyHistory);
             app.history_cursor = scroll_index(app.history_cursor, app.undo_history.len(), delta);
         }
+        ClickTarget::LogOverlay => {}
+    }
+}
+
+fn handle_mouse_hscroll(app: &mut AppState, _col: u16, _row: u16, scroll_left: bool) {
+    if !app.show_log_overlay {
+        return;
+    }
+
+    if scroll_left {
+        app.scroll_log_left();
+    } else {
+        app.scroll_log_right();
     }
 }
 

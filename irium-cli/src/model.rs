@@ -409,6 +409,7 @@ impl FileTree {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ClickTarget {
+    LogOverlay,
     StageTab(Stage),
     ScopeTab(ScopeTab),
     ScopeFileRow(usize),
@@ -579,6 +580,8 @@ pub struct AppState {
     pub show_log_overlay: bool,
     pub log_scroll: usize,
     pub log_view_height: usize,
+    pub log_col_scroll: usize,
+    pub log_view_width: usize,
     pub undo_history: Vec<SessionUndoEntry>,
     pub apply_cursor: usize,
     pub history_cursor: usize,

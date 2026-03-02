@@ -10,18 +10,33 @@ use crate::{
 pub fn map_event(app: &AppState, event: Event) -> Vec<Action> {
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => map_key(app, key),
-        Event::Mouse(mouse) => match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                vec![Action::MouseDown(mouse.column, mouse.row)]
+        Event::Mouse(mouse) => {
+            let shift = mouse.modifiers.contains(KeyModifiers::SHIFT);
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    vec![Action::MouseDown(mouse.column, mouse.row)]
+                }
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    vec![Action::MouseDrag(mouse.column, mouse.row)]
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    vec![Action::MouseUp(mouse.column, mouse.row)]
+                }
+                MouseEventKind::ScrollUp if shift => {
+                    vec![Action::MouseScrollLeft(mouse.column, mouse.row)]
+                }
+                MouseEventKind::ScrollDown if shift => {
+                    vec![Action::MouseScrollRight(mouse.column, mouse.row)]
+                }
+                MouseEventKind::ScrollUp => vec![Action::MouseScrollUp(mouse.column, mouse.row)],
+                MouseEventKind::ScrollDown => vec![Action::MouseScrollDown(mouse.column, mouse.row)],
+                MouseEventKind::ScrollLeft => vec![Action::MouseScrollLeft(mouse.column, mouse.row)],
+                MouseEventKind::ScrollRight => {
+                    vec![Action::MouseScrollRight(mouse.column, mouse.row)]
+                }
+                _ => Vec::new(),
             }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                vec![Action::MouseDrag(mouse.column, mouse.row)]
-            }
-            MouseEventKind::Up(MouseButton::Left) => vec![Action::MouseUp(mouse.column, mouse.row)],
-            MouseEventKind::ScrollUp => vec![Action::MouseScrollUp(mouse.column, mouse.row)],
-            MouseEventKind::ScrollDown => vec![Action::MouseScrollDown(mouse.column, mouse.row)],
-            _ => Vec::new(),
-        },
+        }
         Event::Resize(_, _) => Vec::new(),
         _ => Vec::new(),
     }
@@ -59,11 +74,25 @@ fn map_log_overlay_keys(key: KeyEvent) -> Vec<Action> {
     match key.code {
         KeyCode::Char('L') | KeyCode::Char('l') => vec![Action::ToggleLogOverlay],
         KeyCode::Esc => vec![Action::ToggleLogOverlay],
+        KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            vec![Action::ScrollLogLeft]
+        }
+        KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            vec![Action::ScrollLogRight]
+        }
         KeyCode::Up | KeyCode::Char('k') => vec![Action::ScrollLogUp],
         KeyCode::Down | KeyCode::Char('j') => vec![Action::ScrollLogDown],
-        KeyCode::PageUp => vec![Action::ScrollLogUp, Action::ScrollLogUp, Action::ScrollLogUp],
+        KeyCode::PageUp => vec![
+            Action::ScrollLogUp,
+            Action::ScrollLogUp,
+            Action::ScrollLogUp,
+        ],
         KeyCode::PageDown => {
-            vec![Action::ScrollLogDown, Action::ScrollLogDown, Action::ScrollLogDown]
+            vec![
+                Action::ScrollLogDown,
+                Action::ScrollLogDown,
+                Action::ScrollLogDown,
+            ]
         }
         _ => Vec::new(),
     }
