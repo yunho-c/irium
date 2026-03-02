@@ -21,6 +21,7 @@ The app scans the current working directory and opens a three-stage TUI:
 - `q`: quit
 - `Ctrl+C`: quit immediately
 - `?`: toggle help
+- `L`: toggle logs modal
 - `[` / `]`: previous / next stage
 - `Tab` / `Shift+Tab`: next / previous focus pane
 
@@ -45,13 +46,24 @@ The app scans the current working directory and opens a three-stage TUI:
 
 - `Up` / `Down`: move row/option
 - `Space`: toggle rename-row selection
+- `1` / `2` / `3`: set per-row AI suggestion option for focused preview row
+- `0`: clear per-row option override (fall back to global option)
 - `e`: edit override for focused row
 - `Tab` while editing override: autocomplete from previous overrides
 - `g` then `1..9`: assign group to selected rows
 - `t`: toggle `Suggestions` / `Style` panel
+- `r`: refresh AI suggestions (manual regenerate)
+- `m`: open/close Suggestions settings popup
+- `1` / `2` / `3` in Suggestions pane: set global option index
+- `!` / `@` / `#` in Suggestions pane: alternate global option hotkeys
 - `Left` / `Right` in `Style`: cycle style values
 - `/`: focus natural command input
 - `Enter` in command input: apply deterministic tokens (`short`, `long`, `title`, `lower`, `upper`, `dash`, `underscore`, `space`, `no-colon`, `keep-ext`)
+- In Suggestions settings popup:
+  - `Tab` / `Shift+Tab`: move between settings fields/actions
+  - `d`: discover OpenRouter models
+  - `s`: save API key/model to config
+  - `c`: clear API key
 
 ### Apply
 
@@ -61,6 +73,8 @@ The app scans the current working directory and opens a three-stage TUI:
 ## Current Limitations
 
 - No real filesystem rename write is performed (apply is simulated).
-- No AI categorization/name suggestion integration is implemented.
+- OpenRouter is the only provider exposed in v1.
+- Model discovery uses OpenRouter endpoints and may return partial results depending on auth/network.
+- API key and selected model are persisted in local config (`~/.config/irium/config.toml` on macOS/Linux) with best-effort secure permissions.
 - Undo history is in-memory for the current session only.
 - Mouse support is basic (`click`, `scroll`) and does not include range multi-select gestures.

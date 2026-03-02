@@ -2,12 +2,18 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     hash::Hash,
     path::PathBuf,
+    sync::mpsc::{Receiver, Sender},
     time::Instant,
 };
 
 use ratatui::text::Line;
 use ratatui_interact::{state::FocusManager, traits::ClickRegionRegistry};
 use tachyonfx::Effect;
+
+use crate::ai::{
+    ModelListItem,
+    worker::{AiWorkerCommand, AiWorkerEvent},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Stage {
@@ -134,6 +140,9 @@ pub enum InputMode {
     Command,
     NewCategory,
     AwaitGroup,
+    EditingAiApiKey,
+    EditingAiModelSearch,
+    EditingAiManualModel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -321,12 +330,6 @@ pub struct MarketplacePreset {
 }
 
 #[derive(Debug, Clone)]
-pub struct SuggestionOption {
-    pub label: String,
-    pub style: StyleOptions,
-}
-
-#[derive(Debug, Clone)]
 pub struct PresetState {
     pub selected_extensions: HashSet<String>,
     pub time_constraint: TimeConstraint,
@@ -402,7 +405,6 @@ impl FileTree {
             self.collect_visible(*child, depth.saturating_add(1), out);
         }
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -422,9 +424,86 @@ pub enum ClickTarget {
     NamingRow(usize),
     NamingSuggestion(usize),
     NamingStyleRow(usize),
+    NamingSuggestionsSettingsButton,
+    NamingSuggestionsRefreshButton,
+    NamingAiSettingsApiKeyField,
+    NamingAiSettingsModelSearchField,
+    NamingAiSettingsManualModelField,
+    NamingAiSettingsSaveConfig,
+    NamingAiSettingsClearApiKey,
+    NamingAiSettingsToggleReveal,
+    NamingAiSettingsDiscoverModels,
+    NamingAiSettingsModelRow(usize),
+    NamingRowSuggestionOption {
+        row_index: usize,
+        option_index: usize,
+    },
     ApplyPane(FocusPane),
     ApplyRow(usize),
     ApplyHistoryRow(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AiSettingsField {
+    ApiKey,
+    ModelSearch,
+    ModelList,
+    ManualModel,
+    Save,
+    Discover,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiSettingsState {
+    pub popup_open: bool,
+    pub reveal_api_key: bool,
+    pub active_field: AiSettingsField,
+    pub api_key: Option<String>,
+    pub api_key_input: String,
+    pub selected_model: Option<String>,
+    pub model_search_query: String,
+    pub manual_model_input: String,
+    pub discovered_models: Vec<ModelListItem>,
+    pub model_list_cursor: usize,
+    pub discovery_error: Option<String>,
+}
+
+impl Default for AiSettingsState {
+    fn default() -> Self {
+        Self {
+            popup_open: false,
+            reveal_api_key: false,
+            active_field: AiSettingsField::ApiKey,
+            api_key: None,
+            api_key_input: String::new(),
+            selected_model: None,
+            model_search_query: String::new(),
+            manual_model_input: String::new(),
+            discovered_models: Vec::new(),
+            model_list_cursor: 0,
+            discovery_error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NamingAiStatus {
+    Idle,
+    NeedsConfig,
+    DiscoveringModels,
+    AnalyzingFiles,
+    Generating,
+    Ready,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct SuggestionSet {
+    pub request_id: u64,
+    pub global_option_index: usize,
+    pub per_path_options: HashMap<PathBuf, [String; 3]>,
+    pub per_path_override_index: HashMap<PathBuf, usize>,
+    pub source_model: String,
 }
 
 #[derive(Debug, Clone)]
@@ -444,7 +523,7 @@ pub struct FilesDragState {
     pub start_index: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AppState {
     pub cwd: PathBuf,
     pub stage: Stage,
@@ -483,8 +562,9 @@ pub struct AppState {
     pub rename_cursor: usize,
     pub rename_scroll: usize,
 
-    pub suggestions: Vec<SuggestionOption>,
+    pub suggestions: Vec<String>,
     pub suggestion_cursor: usize,
+    pub suggestion_set: Option<SuggestionSet>,
 
     pub style: StyleOptions,
     pub style_cursor: usize,
@@ -495,6 +575,10 @@ pub struct AppState {
     pub override_vocab: BTreeSet<String>,
 
     pub toasts: Vec<Toast>,
+    pub logs: Vec<String>,
+    pub show_log_overlay: bool,
+    pub log_scroll: usize,
+    pub log_view_height: usize,
     pub undo_history: Vec<SessionUndoEntry>,
     pub apply_cursor: usize,
     pub history_cursor: usize,
@@ -510,4 +594,11 @@ pub struct AppState {
     pub scope_files_drag: Option<FilesDragState>,
     pub title_startup_fx: Option<Effect>,
     pub title_fx_last_frame: Option<Instant>,
+    pub ai_settings: AiSettingsState,
+    pub naming_ai_status: NamingAiStatus,
+    pub naming_ai_error: Option<String>,
+    pub ai_next_request_id: u64,
+    pub ai_active_request_id: Option<u64>,
+    pub ai_worker_tx: Option<Sender<AiWorkerCommand>>,
+    pub ai_worker_rx: Option<Receiver<AiWorkerEvent>>,
 }

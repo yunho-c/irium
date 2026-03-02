@@ -1,14 +1,17 @@
 use std::collections::HashSet;
 
 use crate::model::{
-    AppState, ClickTarget, FilesDragMode, FilesDragState, FocusPane, InputMode, NamingTab,
-    ScopeTab, Stage, ToastLevel,
+    AiSettingsField, AppState, ClickTarget, FilesDragMode, FilesDragState, FocusPane, InputMode,
+    NamingTab, ScopeTab, Stage, ToastLevel,
 };
 
 #[derive(Debug, Clone)]
 pub enum Action {
     Tick,
     Quit,
+    ToggleLogOverlay,
+    ScrollLogUp,
+    ScrollLogDown,
     ToggleHelp,
     NextStage,
     PrevStage,
@@ -27,6 +30,18 @@ pub enum Action {
     SelectAllVisibleFiles,
     ToggleFilesSettingsPopup,
     ToggleShowSelectedCategoriesOnly,
+    TriggerNamingSuggestionsRefresh,
+    ToggleNamingSuggestionsSettings,
+    DiscoverModels,
+    SaveAiSettings,
+    ClearAiApiKey,
+    FocusAiSettingsField(AiSettingsField),
+    SelectAiModelByFilteredIndex(usize),
+    SetGlobalSuggestionOption(usize),
+    SetRowSuggestionOption(usize),
+    ClearRowSuggestionOption,
+    NextAiSettingsField,
+    PrevAiSettingsField,
     ToggleShowHidden,
     SavePreset(u8),
     LoadPreset(u8),
@@ -53,6 +68,9 @@ pub fn reduce(app: &mut AppState, action: Action) {
     match action {
         Action::Tick => app.tick(),
         Action::Quit => app.should_quit = true,
+        Action::ToggleLogOverlay => app.toggle_log_overlay(),
+        Action::ScrollLogUp => app.scroll_log_up(),
+        Action::ScrollLogDown => app.scroll_log_down(),
         Action::ToggleHelp => app.show_help = !app.show_help,
         Action::NextStage => app.set_stage(app.stage.next()),
         Action::PrevStage => app.set_stage(app.stage.prev()),
@@ -98,6 +116,44 @@ pub fn reduce(app: &mut AppState, action: Action) {
                 app.toggle_show_selected_categories_only();
             }
         }
+        Action::TriggerNamingSuggestionsRefresh => {
+            if app.stage == Stage::Naming {
+                app.trigger_naming_suggestions_refresh();
+            }
+        }
+        Action::ToggleNamingSuggestionsSettings => {
+            if app.stage == Stage::Naming {
+                app.toggle_naming_suggestions_settings();
+            }
+        }
+        Action::DiscoverModels => {
+            if app.stage == Stage::Naming {
+                app.discover_openrouter_models();
+            }
+        }
+        Action::SaveAiSettings => {
+            app.save_ai_settings_to_disk();
+        }
+        Action::ClearAiApiKey => {
+            app.clear_ai_api_key();
+        }
+        Action::FocusAiSettingsField(field) => {
+            app.focus_ai_settings_field(field);
+        }
+        Action::SelectAiModelByFilteredIndex(idx) => {
+            app.select_ai_model_by_filtered_index(idx);
+        }
+        Action::SetGlobalSuggestionOption(idx) => {
+            app.set_global_suggestion_option(idx);
+        }
+        Action::SetRowSuggestionOption(idx) => {
+            app.set_row_suggestion_option(idx);
+        }
+        Action::ClearRowSuggestionOption => {
+            app.clear_row_suggestion_option();
+        }
+        Action::NextAiSettingsField => app.ai_settings_next_field(),
+        Action::PrevAiSettingsField => app.ai_settings_prev_field(),
         Action::ToggleShowHidden => app.toggle_show_hidden(),
         Action::SavePreset(slot) => app.save_preset(slot),
         Action::LoadPreset(slot) => app.load_preset(slot),
@@ -139,6 +195,9 @@ pub fn reduce(app: &mut AppState, action: Action) {
             InputMode::EditingOverride => app.override_input.push(ch),
             InputMode::Command => app.command_input.push(ch),
             InputMode::NewCategory => app.new_category_input.push(ch),
+            InputMode::EditingAiApiKey => app.ai_settings.api_key_input.push(ch),
+            InputMode::EditingAiModelSearch => app.ai_settings.model_search_query.push(ch),
+            InputMode::EditingAiManualModel => app.ai_settings.manual_model_input.push(ch),
             InputMode::AwaitGroup | InputMode::Normal => {}
         },
         Action::Backspace => match app.mode {
@@ -151,15 +210,35 @@ pub fn reduce(app: &mut AppState, action: Action) {
             InputMode::NewCategory => {
                 app.new_category_input.pop();
             }
+            InputMode::EditingAiApiKey => {
+                app.ai_settings.api_key_input.pop();
+            }
+            InputMode::EditingAiModelSearch => {
+                app.ai_settings.model_search_query.pop();
+            }
+            InputMode::EditingAiManualModel => {
+                app.ai_settings.manual_model_input.pop();
+            }
             InputMode::AwaitGroup | InputMode::Normal => {}
         },
         Action::CommitInput => handle_commit(app),
         Action::CancelInput => match app.mode {
             InputMode::EditingOverride => app.cancel_override_edit(),
-            InputMode::Command | InputMode::NewCategory | InputMode::AwaitGroup => {
+            InputMode::Command
+            | InputMode::NewCategory
+            | InputMode::AwaitGroup
+            | InputMode::EditingAiApiKey
+            | InputMode::EditingAiModelSearch
+            | InputMode::EditingAiManualModel => {
                 app.mode = InputMode::Normal;
             }
-            InputMode::Normal => app.show_help = false,
+            InputMode::Normal => {
+                if app.stage == Stage::Naming && app.ai_settings.popup_open {
+                    app.ai_settings.popup_open = false;
+                } else {
+                    app.show_help = false;
+                }
+            }
         },
         Action::Autocomplete => {
             if app.mode == InputMode::EditingOverride {
@@ -241,6 +320,27 @@ fn handle_commit(app: &mut AppState) {
         InputMode::EditingOverride => app.commit_override_edit(),
         InputMode::Command => app.apply_command_input(),
         InputMode::NewCategory => app.add_custom_category_from_input(),
+        InputMode::EditingAiApiKey => {
+            let value = app.ai_settings.api_key_input.trim();
+            app.ai_settings.api_key = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
+            app.mode = InputMode::Normal;
+        }
+        InputMode::EditingAiModelSearch => {
+            app.mode = InputMode::Normal;
+        }
+        InputMode::EditingAiManualModel => {
+            let value = app.ai_settings.manual_model_input.trim();
+            app.ai_settings.selected_model = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            };
+            app.mode = InputMode::Normal;
+        }
         InputMode::AwaitGroup => {
             app.mode = InputMode::Normal;
         }
@@ -338,7 +438,8 @@ fn handle_mouse_drag(app: &mut AppState, col: u16, row: u16) {
             }
         }
         (FilesDragMode::RowFocus { visited_rows }, Some(ClickTarget::ScopeFileRow(index)))
-        | (FilesDragMode::RowFocus { visited_rows }, Some(ClickTarget::ScopeFileCheckbox(index))) => {
+        | (FilesDragMode::RowFocus { visited_rows }, Some(ClickTarget::ScopeFileCheckbox(index))) =>
+        {
             app.set_scope_tab(ScopeTab::Files);
             app.set_focus(FocusPane::ScopeFiles);
             app.tree.cursor = index;
@@ -445,6 +546,41 @@ fn handle_click_target(app: &mut AppState, target: ClickTarget) {
             app.suggestion_cursor = index;
             app.apply_suggestion();
         }
+        ClickTarget::NamingSuggestionsSettingsButton => {
+            app.set_focus(FocusPane::NamingRight);
+            app.naming_tab = NamingTab::Suggestions;
+            app.toggle_naming_suggestions_settings();
+        }
+        ClickTarget::NamingSuggestionsRefreshButton => {
+            app.set_focus(FocusPane::NamingRight);
+            app.naming_tab = NamingTab::Suggestions;
+            app.trigger_naming_suggestions_refresh();
+        }
+        ClickTarget::NamingAiSettingsApiKeyField => {
+            app.focus_ai_settings_field(AiSettingsField::ApiKey);
+        }
+        ClickTarget::NamingAiSettingsModelSearchField => {
+            app.focus_ai_settings_field(AiSettingsField::ModelSearch);
+        }
+        ClickTarget::NamingAiSettingsManualModelField => {
+            app.focus_ai_settings_field(AiSettingsField::ManualModel);
+        }
+        ClickTarget::NamingAiSettingsSaveConfig => app.save_ai_settings_to_disk(),
+        ClickTarget::NamingAiSettingsClearApiKey => app.clear_ai_api_key(),
+        ClickTarget::NamingAiSettingsToggleReveal => {
+            app.ai_settings.reveal_api_key = !app.ai_settings.reveal_api_key
+        }
+        ClickTarget::NamingAiSettingsDiscoverModels => app.discover_openrouter_models(),
+        ClickTarget::NamingAiSettingsModelRow(index) => {
+            app.select_ai_model_by_filtered_index(index)
+        }
+        ClickTarget::NamingRowSuggestionOption {
+            row_index,
+            option_index,
+        } => {
+            app.rename_cursor = row_index.min(app.rename_rows.len().saturating_sub(1));
+            app.set_row_suggestion_option(option_index);
+        }
         ClickTarget::NamingStyleRow(index) => {
             app.set_focus(FocusPane::NamingRight);
             app.naming_tab = NamingTab::Style;
@@ -489,14 +625,16 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
             app.tree.cursor = scroll_index(app.tree.cursor, app.scope_files_rows_len(), delta);
             app.normalize_scope_files_cursor();
         }
-        ClickTarget::ScopeFilesSettingsButton | ClickTarget::ScopeFilesSettingShowSelectedCategoriesOnly => {}
+        ClickTarget::ScopeFilesSettingsButton
+        | ClickTarget::ScopeFilesSettingShowSelectedCategoriesOnly => {}
         ClickTarget::ScopeCategoryRow(_) => {
             app.set_scope_tab(ScopeTab::Select);
             app.select_cursor = scroll_index(app.select_cursor, app.category_filters.len(), delta);
         }
         ClickTarget::ScopeConstraintRow(_) => {
             app.set_scope_tab(ScopeTab::Constraint);
-            let max_len = crate::model::TimeConstraint::ALL.len() + crate::model::SizeConstraint::ALL.len();
+            let max_len =
+                crate::model::TimeConstraint::ALL.len() + crate::model::SizeConstraint::ALL.len();
             app.constraint_cursor = scroll_index(app.constraint_cursor, max_len, delta);
         }
         ClickTarget::ScopePresetRow(_) => {
@@ -512,16 +650,19 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
             app.set_focus(focus);
             match focus {
                 FocusPane::ScopeCategory => {
-                    app.select_cursor = scroll_index(app.select_cursor, app.category_filters.len(), delta);
+                    app.select_cursor =
+                        scroll_index(app.select_cursor, app.category_filters.len(), delta);
                 }
                 FocusPane::ScopeFiles => {
-                    app.tree.cursor = scroll_index(app.tree.cursor, app.scope_files_rows_len(), delta);
+                    app.tree.cursor =
+                        scroll_index(app.tree.cursor, app.scope_files_rows_len(), delta);
                     app.normalize_scope_files_cursor();
                 }
                 FocusPane::ScopeOptions => {
                     let max_len = match app.scope_right_tab {
                         ScopeTab::Constraint => {
-                            crate::model::TimeConstraint::ALL.len() + crate::model::SizeConstraint::ALL.len()
+                            crate::model::TimeConstraint::ALL.len()
+                                + crate::model::SizeConstraint::ALL.len()
                         }
                         ScopeTab::Preset => 9,
                         ScopeTab::Marketplace => app.marketplace_presets.len(),
@@ -549,7 +690,8 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
             app.set_focus(focus);
             match focus {
                 FocusPane::NamingTable => {
-                    app.rename_cursor = scroll_index(app.rename_cursor, app.rename_rows.len(), delta);
+                    app.rename_cursor =
+                        scroll_index(app.rename_cursor, app.rename_rows.len(), delta);
                 }
                 FocusPane::NamingRight => {
                     if app.naming_tab == NamingTab::Suggestions {
@@ -570,8 +712,24 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
         ClickTarget::NamingSuggestion(_) => {
             app.set_focus(FocusPane::NamingRight);
             app.naming_tab = NamingTab::Suggestions;
-            app.suggestion_cursor = scroll_index(app.suggestion_cursor, app.suggestions.len(), delta);
+            app.suggestion_cursor =
+                scroll_index(app.suggestion_cursor, app.suggestions.len(), delta);
         }
+        ClickTarget::NamingAiSettingsModelRow(_) => {
+            let max = app.filtered_ai_models().len();
+            app.ai_settings.model_list_cursor =
+                scroll_index(app.ai_settings.model_list_cursor, max, delta);
+        }
+        ClickTarget::NamingSuggestionsSettingsButton
+        | ClickTarget::NamingSuggestionsRefreshButton
+        | ClickTarget::NamingAiSettingsApiKeyField
+        | ClickTarget::NamingAiSettingsModelSearchField
+        | ClickTarget::NamingAiSettingsManualModelField
+        | ClickTarget::NamingAiSettingsSaveConfig
+        | ClickTarget::NamingAiSettingsClearApiKey
+        | ClickTarget::NamingAiSettingsToggleReveal
+        | ClickTarget::NamingAiSettingsDiscoverModels
+        | ClickTarget::NamingRowSuggestionOption { .. } => {}
         ClickTarget::NamingStyleRow(_) => {
             app.set_focus(FocusPane::NamingRight);
             app.naming_tab = NamingTab::Style;

@@ -1,5 +1,7 @@
 mod actions;
+mod ai;
 mod app;
+mod config;
 mod fs_scan;
 mod input;
 mod mock;
@@ -29,6 +31,7 @@ fn main() -> io::Result<()> {
     install_panic_hook();
     let mut app = AppState::new(std::env::current_dir()?);
     let result = run_app(&mut terminal, &mut app);
+    app.shutdown_ai_worker();
     restore_terminal(&mut terminal)?;
     result
 }

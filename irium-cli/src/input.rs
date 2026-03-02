@@ -33,13 +33,39 @@ fn map_key(app: &AppState, key: KeyEvent) -> Vec<Action> {
     {
         return vec![Action::Quit];
     }
+    if app.show_log_overlay {
+        return map_log_overlay_keys(key);
+    }
 
     match app.mode {
-        InputMode::EditingOverride | InputMode::Command | InputMode::NewCategory => {
-            map_text_input_keys(app, key)
-        }
+        InputMode::EditingOverride
+        | InputMode::Command
+        | InputMode::NewCategory
+        | InputMode::EditingAiApiKey
+        | InputMode::EditingAiModelSearch
+        | InputMode::EditingAiManualModel => map_text_input_keys(app, key),
         InputMode::AwaitGroup => map_group_keys(key),
         InputMode::Normal => map_normal_keys(app, key),
+    }
+}
+
+fn map_log_overlay_keys(key: KeyEvent) -> Vec<Action> {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return Vec::new();
+    }
+    match key.code {
+        KeyCode::Char('L') | KeyCode::Char('l') => vec![Action::ToggleLogOverlay],
+        KeyCode::Esc => vec![Action::ToggleLogOverlay],
+        KeyCode::Up | KeyCode::Char('k') => vec![Action::ScrollLogUp],
+        KeyCode::Down | KeyCode::Char('j') => vec![Action::ScrollLogDown],
+        KeyCode::PageUp => vec![Action::ScrollLogUp, Action::ScrollLogUp, Action::ScrollLogUp],
+        KeyCode::PageDown => {
+            vec![Action::ScrollLogDown, Action::ScrollLogDown, Action::ScrollLogDown]
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -48,6 +74,26 @@ fn map_text_input_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
         KeyCode::Esc => vec![Action::CancelInput],
         KeyCode::Enter => vec![Action::CommitInput],
         KeyCode::Backspace => vec![Action::Backspace],
+        KeyCode::Tab
+            if matches!(
+                app.mode,
+                InputMode::EditingAiApiKey
+                    | InputMode::EditingAiModelSearch
+                    | InputMode::EditingAiManualModel
+            ) =>
+        {
+            vec![Action::NextAiSettingsField]
+        }
+        KeyCode::BackTab
+            if matches!(
+                app.mode,
+                InputMode::EditingAiApiKey
+                    | InputMode::EditingAiModelSearch
+                    | InputMode::EditingAiManualModel
+            ) =>
+        {
+            vec![Action::PrevAiSettingsField]
+        }
         KeyCode::Tab if app.mode == InputMode::EditingOverride => vec![Action::Autocomplete],
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             vec![Action::InputChar(ch)]
@@ -65,6 +111,80 @@ fn map_group_keys(key: KeyEvent) -> Vec<Action> {
 }
 
 fn map_normal_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        && matches!(key.code, KeyCode::Char('L') | KeyCode::Char('l'))
+    {
+        return vec![Action::ToggleLogOverlay];
+    }
+    if app.stage == Stage::Naming && app.ai_settings.popup_open {
+        if key.code == KeyCode::Tab {
+            return vec![Action::NextAiSettingsField];
+        }
+        if key.code == KeyCode::BackTab {
+            return vec![Action::PrevAiSettingsField];
+        }
+    }
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        && matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'))
+        && app.stage == Stage::Naming
+    {
+        return vec![Action::ToggleNamingSuggestionsSettings];
+    }
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        && matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R'))
+        && app.stage == Stage::Naming
+    {
+        return vec![Action::TriggerNamingSuggestionsRefresh];
+    }
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        && app.stage == Stage::Naming
+        && app.focus == FocusPane::NamingTable
+    {
+        match key.code {
+            KeyCode::Char('1') => return vec![Action::SetRowSuggestionOption(0)],
+            KeyCode::Char('2') => return vec![Action::SetRowSuggestionOption(1)],
+            KeyCode::Char('3') => return vec![Action::SetRowSuggestionOption(2)],
+            KeyCode::Char('0') => return vec![Action::ClearRowSuggestionOption],
+            _ => {}
+        }
+    }
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        && app.stage == Stage::Naming
+        && app.focus == FocusPane::NamingRight
+        && app.naming_tab == crate::model::NamingTab::Suggestions
+    {
+        match key.code {
+            KeyCode::Char('1') | KeyCode::Char('!') => {
+                return vec![Action::SetGlobalSuggestionOption(0)];
+            }
+            KeyCode::Char('2') | KeyCode::Char('@') => {
+                return vec![Action::SetGlobalSuggestionOption(1)];
+            }
+            KeyCode::Char('3') | KeyCode::Char('#') => {
+                return vec![Action::SetGlobalSuggestionOption(2)];
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') if app.ai_settings.popup_open => {
+                return vec![Action::DiscoverModels];
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') if app.ai_settings.popup_open => {
+                return vec![Action::SaveAiSettings];
+            }
+            KeyCode::Char('c') | KeyCode::Char('C') if app.ai_settings.popup_open => {
+                return vec![Action::ClearAiApiKey];
+            }
+            _ => {}
+        }
+    }
     if !key
         .modifiers
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
@@ -112,7 +232,36 @@ fn map_normal_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
         KeyCode::Down => vec![Action::MoveDown],
         KeyCode::Left => vec![Action::MoveLeft],
         KeyCode::Right => vec![Action::MoveRight],
-        KeyCode::Enter => vec![Action::CommitInput],
+        KeyCode::Enter => {
+            if app.ai_settings.popup_open && app.stage == Stage::Naming {
+                match app.ai_settings.active_field {
+                    crate::model::AiSettingsField::ApiKey => {
+                        vec![Action::FocusAiSettingsField(
+                            crate::model::AiSettingsField::ApiKey,
+                        )]
+                    }
+                    crate::model::AiSettingsField::ModelSearch => {
+                        vec![Action::FocusAiSettingsField(
+                            crate::model::AiSettingsField::ModelSearch,
+                        )]
+                    }
+                    crate::model::AiSettingsField::ModelList => {
+                        vec![Action::SelectAiModelByFilteredIndex(
+                            app.ai_settings.model_list_cursor,
+                        )]
+                    }
+                    crate::model::AiSettingsField::ManualModel => {
+                        vec![Action::FocusAiSettingsField(
+                            crate::model::AiSettingsField::ManualModel,
+                        )]
+                    }
+                    crate::model::AiSettingsField::Save => vec![Action::SaveAiSettings],
+                    crate::model::AiSettingsField::Discover => vec![Action::DiscoverModels],
+                }
+            } else {
+                vec![Action::CommitInput]
+            }
+        }
         KeyCode::Char(' ') => vec![Action::ToggleSelect],
         KeyCode::Char('h') => vec![Action::ToggleShowHidden],
         KeyCode::Char('t') => {
@@ -187,7 +336,10 @@ mod tests {
 
         let event = Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
         let actions = map_event(&app, event);
-        assert!(!matches!(actions.as_slice(), [Action::SelectAllVisibleFiles]));
+        assert!(!matches!(
+            actions.as_slice(),
+            [Action::SelectAllVisibleFiles]
+        ));
     }
 
     #[test]
@@ -200,7 +352,10 @@ mod tests {
 
         let event = Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
         let actions = map_event(&app, event);
-        assert!(matches!(actions.as_slice(), [Action::SelectAllVisibleFiles]));
+        assert!(matches!(
+            actions.as_slice(),
+            [Action::SelectAllVisibleFiles]
+        ));
     }
 
     #[test]
@@ -213,7 +368,10 @@ mod tests {
 
         let event = Event::Key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
         let actions = map_event(&app, event);
-        assert!(matches!(actions.as_slice(), [Action::ToggleFilesSettingsPopup]));
+        assert!(matches!(
+            actions.as_slice(),
+            [Action::ToggleFilesSettingsPopup]
+        ));
     }
 
     #[test]

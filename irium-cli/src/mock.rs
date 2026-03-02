@@ -2,7 +2,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::model::{
     Capitalization, CategoryFilter, MarketplacePreset, NameLength, Separator, SizeConstraint,
-    StyleOptions, SuggestionOption, TimeConstraint,
+    StyleOptions, TimeConstraint,
 };
 
 pub fn default_category_filters() -> Vec<CategoryFilter> {
@@ -270,38 +270,11 @@ pub fn parse_style_command(input: &str, style: &mut StyleOptions) -> usize {
     applied
 }
 
-pub fn make_suggestion_options() -> Vec<SuggestionOption> {
+pub fn default_suggestion_labels() -> Vec<String> {
     vec![
-        SuggestionOption {
-            label: "Concise / Kebab".to_string(),
-            style: StyleOptions {
-                length: NameLength::Short,
-                capitalization: Capitalization::Lower,
-                separator: Separator::Dash,
-                keep_extension: true,
-                strip_colons: true,
-            },
-        },
-        SuggestionOption {
-            label: "Professional / Title".to_string(),
-            style: StyleOptions {
-                length: NameLength::Medium,
-                capitalization: Capitalization::Title,
-                separator: Separator::Space,
-                keep_extension: true,
-                strip_colons: true,
-            },
-        },
-        SuggestionOption {
-            label: "Legacy / UPPER_SNAKE".to_string(),
-            style: StyleOptions {
-                length: NameLength::Medium,
-                capitalization: Capitalization::Upper,
-                separator: Separator::Underscore,
-                keep_extension: true,
-                strip_colons: true,
-            },
-        },
+        "Option 1".to_string(),
+        "Option 2".to_string(),
+        "Option 3".to_string(),
     ]
 }
 

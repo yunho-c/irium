@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
+    sync::mpsc::TryRecvError,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -8,18 +9,44 @@ use ratatui::text::Line;
 use tachyonfx::{Interpolation, fx, pattern::SweepPattern};
 
 use crate::{
+    ai::{
+        self,
+        worker::{AiWorkerCommand, AiWorkerEvent, WorkerProgressStage},
+    },
+    config::{AppConfig, load_app_config, save_app_config},
     fs_scan::{self, FsEntry},
     mock,
     model::{
-        AppState, CategoryFilter, FileNode, FileTree, FocusPane, InputMode, MarketplacePreset,
-        NamingTab, PresetState, RenameRow, ScopeTab, SessionUndoEntry, SizeConstraint, Stage,
-        StyleOptions, TimeConstraint, Toast, ToastLevel, VisibleNode,
+        AiSettingsField, AiSettingsState, AppState, CategoryFilter, FileNode, FileTree, FocusPane,
+        InputMode, MarketplacePreset, NamingAiStatus, NamingTab, PresetState, RenameRow, ScopeTab,
+        SessionUndoEntry, SizeConstraint, Stage, StyleOptions, SuggestionSet, TimeConstraint,
+        Toast, ToastLevel, VisibleNode,
     },
 };
+
+fn build_ai_settings_from_config(config: &AppConfig) -> AiSettingsState {
+    let mut settings = AiSettingsState {
+        api_key: config.openrouter_api_key.clone(),
+        selected_model: config.openrouter_model.clone(),
+        ..Default::default()
+    };
+    settings.api_key_input = settings.api_key.clone().unwrap_or_default();
+    settings.manual_model_input = settings.selected_model.clone().unwrap_or_default();
+    settings
+}
 
 impl AppState {
     pub fn new(cwd: PathBuf) -> Self {
         let tree = FileTree::new(cwd.clone());
+        let loaded_config = load_app_config().unwrap_or_default();
+        let mut ai_settings = build_ai_settings_from_config(&loaded_config);
+        let (ai_worker_tx, ai_worker_rx) = match ai::worker::spawn_worker() {
+            Ok((tx, rx)) => (Some(tx), Some(rx)),
+            Err(_) => (None, None),
+        };
+        if ai_settings.selected_model.is_none() {
+            ai_settings.manual_model_input = "google/gemini-2.0-flash-001".to_string();
+        }
         let mut app = Self {
             cwd,
             stage: Stage::Scope,
@@ -51,8 +78,9 @@ impl AppState {
             rename_rows: Vec::new(),
             rename_cursor: 0,
             rename_scroll: 0,
-            suggestions: mock::make_suggestion_options(),
+            suggestions: mock::default_suggestion_labels(),
             suggestion_cursor: 0,
+            suggestion_set: None,
             style: StyleOptions::default(),
             style_cursor: 0,
             command_input: String::new(),
@@ -65,6 +93,10 @@ impl AppState {
                     .to_string(),
                 ttl_ticks: 55,
             }],
+            logs: Vec::new(),
+            show_log_overlay: false,
+            log_scroll: 0,
+            log_view_height: 0,
             undo_history: Vec::new(),
             apply_cursor: 0,
             history_cursor: 0,
@@ -72,11 +104,12 @@ impl AppState {
             ticks: 0,
             help_lines: vec![
                 Line::from("Global: q quit | [ / ] stage | Tab focus | ? help"),
+                Line::from("Global: L logs overlay"),
                 Line::from(
                     "Files: arrows move | Space select | A select-all | p settings | v toggle category-filter",
                 ),
                 Line::from(
-                    "Naming: e edit override | g then 1-9 assign group | / style command | Enter apply",
+                    "Naming: r refresh AI | m suggestions settings | 1-3 row option | / style command",
                 ),
                 Line::from("Apply: Enter submit+exit (simulated) | Ctrl+Enter submit+stay"),
             ],
@@ -94,11 +127,24 @@ impl AppState {
                 .with_pattern(SweepPattern::left_to_right(80)),
             ),
             title_fx_last_frame: Some(Instant::now()),
+            ai_settings,
+            naming_ai_status: NamingAiStatus::Idle,
+            naming_ai_error: None,
+            ai_next_request_id: 1,
+            ai_active_request_id: None,
+            ai_worker_tx,
+            ai_worker_rx,
         };
 
         app.sync_focus_manager();
         app.reload_tree();
         app.sync_rename_rows();
+        app.append_log("INFO", "App initialized");
+        app.naming_ai_status = if app.ai_settings_has_minimum_config() {
+            NamingAiStatus::Idle
+        } else {
+            NamingAiStatus::NeedsConfig
+        };
         app
     }
 
@@ -170,6 +216,7 @@ impl AppState {
         self.set_focus(self.stage_focuses()[0]);
         if self.stage == Stage::Naming {
             self.sync_rename_rows();
+            self.trigger_naming_suggestions_refresh_if_configured();
         }
     }
 
@@ -215,16 +262,54 @@ impl AppState {
 
     pub fn tick(&mut self) {
         self.ticks = self.ticks.saturating_add(1);
+        self.poll_ai_events();
         for toast in &mut self.toasts {
             toast.ttl_ticks = toast.ttl_ticks.saturating_sub(1);
         }
         self.toasts.retain(|toast| toast.ttl_ticks > 0);
     }
 
+    pub fn shutdown_ai_worker(&mut self) {
+        if let Some(tx) = &self.ai_worker_tx {
+            let _ = tx.send(AiWorkerCommand::Shutdown);
+        }
+    }
+
+    pub fn toggle_log_overlay(&mut self) {
+        self.show_log_overlay = !self.show_log_overlay;
+        if self.show_log_overlay {
+            self.scroll_logs_to_bottom();
+        }
+    }
+
+    pub fn scroll_log_up(&mut self) {
+        let max_start = self
+            .logs
+            .len()
+            .saturating_sub(self.log_view_height.max(1));
+        self.log_scroll = self.log_scroll.min(max_start).saturating_sub(1);
+    }
+
+    pub fn scroll_log_down(&mut self) {
+        let max_start = self
+            .logs
+            .len()
+            .saturating_sub(self.log_view_height.max(1));
+        self.log_scroll = self.log_scroll.saturating_add(1).min(max_start);
+    }
+
     pub fn push_toast(&mut self, level: ToastLevel, message: impl Into<String>) {
+        let message = message.into();
+        let level_label = match level {
+            ToastLevel::Info => "INFO",
+            ToastLevel::Success => "SUCCESS",
+            ToastLevel::Warning => "WARN",
+            ToastLevel::Error => "ERROR",
+        };
+        self.append_log(level_label, &message);
         self.toasts.push(Toast {
             level,
-            message: message.into(),
+            message,
             ttl_ticks: 45,
         });
 
@@ -425,7 +510,14 @@ impl AppState {
             }
             FocusPane::NamingRight => match self.naming_tab {
                 NamingTab::Suggestions => {
-                    self.suggestion_cursor = self.suggestion_cursor.saturating_sub(1);
+                    if self.ai_settings.popup_open
+                        && self.ai_settings.active_field == AiSettingsField::ModelList
+                    {
+                        self.ai_settings.model_list_cursor =
+                            self.ai_settings.model_list_cursor.saturating_sub(1);
+                    } else {
+                        self.suggestion_cursor = self.suggestion_cursor.saturating_sub(1);
+                    }
                 }
                 NamingTab::Style => {
                     self.style_cursor = self.style_cursor.saturating_sub(1);
@@ -445,7 +537,15 @@ impl AppState {
             }
             FocusPane::NamingRight => match self.naming_tab {
                 NamingTab::Suggestions => {
-                    if !self.suggestions.is_empty() {
+                    if self.ai_settings.popup_open
+                        && self.ai_settings.active_field == AiSettingsField::ModelList
+                    {
+                        let max = self.filtered_ai_models().len();
+                        if max > 0 {
+                            self.ai_settings.model_list_cursor =
+                                (self.ai_settings.model_list_cursor + 1).min(max - 1);
+                        }
+                    } else if !self.suggestions.is_empty() {
                         self.suggestion_cursor =
                             (self.suggestion_cursor + 1).min(self.suggestions.len() - 1);
                     }
@@ -959,7 +1059,8 @@ impl AppState {
             let selected = existing.as_ref().map(|row| row.selected).unwrap_or(true);
             let group_id = existing.as_ref().map(|row| row.group_id).unwrap_or(1);
 
-            let proposed_name = self.propose_name(&stem, ext.as_deref(), override_name.as_deref());
+            let proposed_name =
+                self.propose_name(&entry.path, &stem, ext.as_deref(), override_name.as_deref());
             let current_name = entry
                 .path
                 .file_name()
@@ -979,6 +1080,16 @@ impl AppState {
         }
 
         self.rename_rows = rows;
+        if let Some(set) = &mut self.suggestion_set {
+            let paths: HashSet<PathBuf> = self
+                .rename_rows
+                .iter()
+                .map(|row| row.path.clone())
+                .collect();
+            set.per_path_options.retain(|path, _| paths.contains(path));
+            set.per_path_override_index
+                .retain(|path, _| paths.contains(path));
+        }
         if self.rename_rows.is_empty() {
             self.rename_cursor = 0;
         } else {
@@ -1014,7 +1125,13 @@ impl AppState {
         }
     }
 
-    fn propose_name(&self, stem: &str, ext: Option<&str>, override_name: Option<&str>) -> String {
+    fn propose_name(
+        &self,
+        path: &Path,
+        stem: &str,
+        ext: Option<&str>,
+        override_name: Option<&str>,
+    ) -> String {
         if let Some(override_name) = override_name {
             let trimmed = override_name.trim();
             if !trimmed.is_empty() {
@@ -1030,6 +1147,10 @@ impl AppState {
             }
         }
 
+        if let Some(base) = self.ai_candidate_for_path(path, ext) {
+            return mock::format_name(&base, ext, &self.style);
+        }
+
         mock::format_name(stem, ext, &self.style)
     }
 
@@ -1039,7 +1160,7 @@ impl AppState {
             let (stem, ext) = Self::file_name_parts(&path);
             let override_name = self.rename_rows[idx].override_name.clone();
             self.rename_rows[idx].proposed_name =
-                self.propose_name(&stem, ext.as_deref(), override_name.as_deref());
+                self.propose_name(&path, &stem, ext.as_deref(), override_name.as_deref());
         }
         self.recompute_conflicts();
     }
@@ -1080,15 +1201,401 @@ impl AppState {
         if self.suggestion_cursor >= self.suggestions.len() {
             return;
         }
-        self.style = self.suggestions[self.suggestion_cursor].style.clone();
+        if let Some(set) = &mut self.suggestion_set {
+            set.global_option_index = self.suggestion_cursor.min(2);
+        } else {
+            return;
+        }
         self.recompute_proposals();
         self.push_toast(
             ToastLevel::Success,
             format!(
                 "Applied suggestion: {}",
-                self.suggestions[self.suggestion_cursor].label
+                self.suggestions[self.suggestion_cursor]
             ),
         );
+    }
+
+    pub fn set_global_suggestion_option(&mut self, option_index: usize) {
+        let option_index = option_index.min(2);
+        self.suggestion_cursor = option_index;
+        if let Some(set) = &mut self.suggestion_set {
+            set.global_option_index = option_index;
+            self.recompute_proposals();
+        }
+    }
+
+    pub fn set_row_suggestion_option(&mut self, option_index: usize) {
+        let option_index = option_index.min(2);
+        if self.rename_rows.is_empty() {
+            return;
+        }
+        let row = self.rename_cursor.min(self.rename_rows.len() - 1);
+        if let Some(set) = &mut self.suggestion_set {
+            let path = self.rename_rows[row].path.clone();
+            set.per_path_override_index.insert(path, option_index);
+            self.recompute_proposals();
+        }
+    }
+
+    pub fn clear_row_suggestion_option(&mut self) {
+        if self.rename_rows.is_empty() {
+            return;
+        }
+        let row = self.rename_cursor.min(self.rename_rows.len() - 1);
+        if let Some(set) = &mut self.suggestion_set {
+            let path = self.rename_rows[row].path.clone();
+            set.per_path_override_index.remove(&path);
+            self.recompute_proposals();
+        }
+    }
+
+    pub fn toggle_naming_suggestions_settings(&mut self) {
+        self.ai_settings.popup_open = !self.ai_settings.popup_open;
+        if !self.ai_settings.popup_open {
+            self.mode = InputMode::Normal;
+        }
+    }
+
+    pub fn focus_ai_settings_field(&mut self, field: AiSettingsField) {
+        self.ai_settings.active_field = field;
+        self.mode = match field {
+            AiSettingsField::ApiKey => InputMode::EditingAiApiKey,
+            AiSettingsField::ModelSearch => InputMode::EditingAiModelSearch,
+            AiSettingsField::ManualModel => InputMode::EditingAiManualModel,
+            AiSettingsField::ModelList | AiSettingsField::Save | AiSettingsField::Discover => {
+                InputMode::Normal
+            }
+        };
+    }
+
+    pub fn ai_settings_next_field(&mut self) {
+        use AiSettingsField as F;
+        let next = match self.ai_settings.active_field {
+            F::ApiKey => F::ModelSearch,
+            F::ModelSearch => F::ModelList,
+            F::ModelList => F::ManualModel,
+            F::ManualModel => F::Discover,
+            F::Discover => F::Save,
+            F::Save => F::ApiKey,
+        };
+        self.focus_ai_settings_field(next);
+    }
+
+    pub fn ai_settings_prev_field(&mut self) {
+        use AiSettingsField as F;
+        let prev = match self.ai_settings.active_field {
+            F::ApiKey => F::Save,
+            F::ModelSearch => F::ApiKey,
+            F::ModelList => F::ModelSearch,
+            F::ManualModel => F::ModelList,
+            F::Discover => F::ManualModel,
+            F::Save => F::Discover,
+        };
+        self.focus_ai_settings_field(prev);
+    }
+
+    pub fn save_ai_settings_to_disk(&mut self) {
+        if !self.ai_settings.api_key_input.trim().is_empty() {
+            self.ai_settings.api_key = Some(self.ai_settings.api_key_input.trim().to_string());
+        }
+        if !self.ai_settings.manual_model_input.trim().is_empty() {
+            self.ai_settings.selected_model =
+                Some(self.ai_settings.manual_model_input.trim().to_string());
+        }
+
+        let config = AppConfig {
+            openrouter_api_key: self.ai_settings.api_key.clone(),
+            openrouter_model: self.ai_settings.selected_model.clone(),
+        };
+        match save_app_config(&config) {
+            Ok(path) => {
+                self.push_toast(
+                    ToastLevel::Success,
+                    format!("Saved AI settings to {}", path.display()),
+                );
+            }
+            Err(error) => {
+                self.push_toast(ToastLevel::Error, error);
+            }
+        }
+        self.naming_ai_status = if self.ai_settings_has_minimum_config() {
+            NamingAiStatus::Idle
+        } else {
+            NamingAiStatus::NeedsConfig
+        };
+    }
+
+    pub fn clear_ai_api_key(&mut self) {
+        self.ai_settings.api_key = None;
+        self.ai_settings.api_key_input.clear();
+        self.naming_ai_status = NamingAiStatus::NeedsConfig;
+        self.push_toast(ToastLevel::Info, "Cleared OpenRouter API key");
+    }
+
+    pub fn discover_openrouter_models(&mut self) {
+        let request_id = self.next_ai_request_id();
+        self.ai_active_request_id = Some(request_id);
+        self.naming_ai_status = NamingAiStatus::DiscoveringModels;
+        self.naming_ai_error = None;
+        if let Some(tx) = &self.ai_worker_tx {
+            let _ = tx.send(AiWorkerCommand::DiscoverModels {
+                request_id,
+                api_key: self.ai_settings.api_key.clone(),
+            });
+        } else {
+            self.naming_ai_status = NamingAiStatus::Error;
+            self.naming_ai_error = Some("AI worker is not available".to_string());
+        }
+    }
+
+    pub fn trigger_naming_suggestions_refresh_if_configured(&mut self) {
+        if self.ai_settings_has_minimum_config() {
+            self.trigger_naming_suggestions_refresh();
+        } else {
+            self.naming_ai_status = NamingAiStatus::NeedsConfig;
+            self.naming_ai_error = None;
+        }
+    }
+
+    pub fn trigger_naming_suggestions_refresh(&mut self) {
+        if !self.ai_settings_has_minimum_config() {
+            self.naming_ai_status = NamingAiStatus::NeedsConfig;
+            self.push_toast(
+                ToastLevel::Warning,
+                "Open Suggestions settings (m) and configure OpenRouter key + model",
+            );
+            return;
+        }
+        if self.rename_rows.is_empty() {
+            self.naming_ai_status = NamingAiStatus::Idle;
+            return;
+        }
+
+        let Some(api_key) = self.ai_settings.api_key.clone() else {
+            self.naming_ai_status = NamingAiStatus::NeedsConfig;
+            return;
+        };
+        let Some(model_id) = self.ai_settings.selected_model.clone() else {
+            self.naming_ai_status = NamingAiStatus::NeedsConfig;
+            return;
+        };
+
+        let request_id = self.next_ai_request_id();
+        self.ai_active_request_id = Some(request_id);
+        self.naming_ai_error = None;
+        self.naming_ai_status = NamingAiStatus::AnalyzingFiles;
+
+        let paths = self
+            .rename_rows
+            .iter()
+            .map(|row| row.path.clone())
+            .collect::<Vec<_>>();
+        if let Some(tx) = &self.ai_worker_tx {
+            let _ = tx.send(AiWorkerCommand::GenerateSuggestions {
+                request_id,
+                api_key,
+                model_id,
+                paths,
+            });
+        } else {
+            self.naming_ai_status = NamingAiStatus::Error;
+            self.naming_ai_error = Some("AI worker is not available".to_string());
+        }
+    }
+
+    fn poll_ai_events(&mut self) {
+        loop {
+            let next = self.ai_worker_rx.as_ref().map(|rx| rx.try_recv());
+            let Some(result) = next else {
+                return;
+            };
+            match result {
+                Ok(event) => self.handle_ai_event(event),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.naming_ai_status = NamingAiStatus::Error;
+                    self.naming_ai_error = Some("AI worker disconnected".to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    fn handle_ai_event(&mut self, event: AiWorkerEvent) {
+        match event {
+            AiWorkerEvent::ProgressUpdate { request_id, stage } => {
+                if Some(request_id) != self.ai_active_request_id {
+                    return;
+                }
+                self.naming_ai_status = match stage {
+                    WorkerProgressStage::DiscoveringModels => NamingAiStatus::DiscoveringModels,
+                    WorkerProgressStage::AnalyzingFiles => NamingAiStatus::AnalyzingFiles,
+                    WorkerProgressStage::Generating => NamingAiStatus::Generating,
+                };
+            }
+            AiWorkerEvent::ModelsDiscovered { request_id, models } => {
+                if Some(request_id) != self.ai_active_request_id {
+                    return;
+                }
+                self.ai_settings.discovered_models = models;
+                self.ai_settings.model_list_cursor = 0;
+                self.ai_settings.discovery_error = None;
+                self.naming_ai_status = NamingAiStatus::Ready;
+                self.naming_ai_error = None;
+                if self.ai_settings.selected_model.is_none()
+                    && let Some(first) = self.ai_settings.discovered_models.first()
+                {
+                    self.ai_settings.selected_model = Some(first.id.clone());
+                    self.ai_settings.manual_model_input = first.id.clone();
+                }
+            }
+            AiWorkerEvent::SuggestionsReady {
+                request_id,
+                source_model,
+                per_path_options,
+                warnings,
+                skipped_files,
+            } => {
+                if Some(request_id) != self.ai_active_request_id {
+                    return;
+                }
+                let mut set = SuggestionSet {
+                    request_id,
+                    global_option_index: self.suggestion_cursor.min(2),
+                    per_path_options,
+                    per_path_override_index: self
+                        .suggestion_set
+                        .as_ref()
+                        .map(|s| s.per_path_override_index.clone())
+                        .unwrap_or_default(),
+                    source_model,
+                };
+                set.per_path_override_index
+                    .retain(|path, _| set.per_path_options.contains_key(path));
+                self.suggestion_set = Some(set);
+                self.naming_ai_status = NamingAiStatus::Ready;
+                self.naming_ai_error = None;
+                self.recompute_proposals();
+                if skipped_files > 0 {
+                    self.push_toast(
+                        ToastLevel::Info,
+                        format!(
+                            "AI analyzed first {} files ({} skipped by cap)",
+                            ai::MAX_FILES_PER_RUN,
+                            skipped_files
+                        ),
+                    );
+                }
+                if !warnings.is_empty() {
+                    self.push_toast(
+                        ToastLevel::Warning,
+                        format!("AI finished with {} warning(s)", warnings.len()),
+                    );
+                }
+            }
+            AiWorkerEvent::AiError {
+                request_id,
+                message,
+            } => {
+                if request_id != 0 && Some(request_id) != self.ai_active_request_id {
+                    return;
+                }
+                self.naming_ai_status = NamingAiStatus::Error;
+                self.naming_ai_error = Some(message.clone());
+                self.push_toast(ToastLevel::Error, message);
+            }
+        }
+    }
+
+    fn ai_settings_has_minimum_config(&self) -> bool {
+        self.ai_settings
+            .api_key
+            .as_ref()
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+            && self
+                .ai_settings
+                .selected_model
+                .as_ref()
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+    }
+
+    fn next_ai_request_id(&mut self) -> u64 {
+        let id = self.ai_next_request_id;
+        self.ai_next_request_id = self.ai_next_request_id.saturating_add(1);
+        id
+    }
+
+    fn append_log(&mut self, level: &str, message: &str) {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.logs.push(format!("[{ts}] {level}: {message}"));
+        if self.logs.len() > 1000 {
+            let extra = self.logs.len() - 1000;
+            self.logs.drain(0..extra);
+        }
+        self.scroll_logs_to_bottom();
+    }
+
+    fn scroll_logs_to_bottom(&mut self) {
+        let max_start = self
+            .logs
+            .len()
+            .saturating_sub(self.log_view_height.max(1));
+        self.log_scroll = max_start;
+    }
+
+    pub fn filtered_ai_models(&self) -> Vec<(usize, crate::ai::ModelListItem)> {
+        let query = self.ai_settings.model_search_query.trim().to_lowercase();
+        self.ai_settings
+            .discovered_models
+            .iter()
+            .enumerate()
+            .filter(|(_, model)| {
+                query.is_empty()
+                    || model.id.to_lowercase().contains(&query)
+                    || model.name.to_lowercase().contains(&query)
+            })
+            .map(|(idx, model)| (idx, model.clone()))
+            .collect()
+    }
+
+    pub fn select_ai_model_by_filtered_index(&mut self, filtered_index: usize) {
+        let filtered = self.filtered_ai_models();
+        if filtered_index >= filtered.len() {
+            return;
+        }
+        let model_id = filtered[filtered_index].1.id.clone();
+        self.ai_settings.selected_model = Some(model_id.clone());
+        self.ai_settings.manual_model_input = model_id;
+        self.ai_settings.model_list_cursor = filtered_index;
+    }
+
+    fn ai_candidate_for_path(&self, path: &Path, ext: Option<&str>) -> Option<String> {
+        let set = self.suggestion_set.as_ref()?;
+        let options = set.per_path_options.get(path)?;
+        let idx = set
+            .per_path_override_index
+            .get(path)
+            .copied()
+            .unwrap_or(set.global_option_index)
+            .min(2);
+        let mut candidate = options[idx].trim().to_string();
+        if candidate.is_empty() {
+            return None;
+        }
+        if let Some(ext) = ext {
+            let suffix = format!(".{ext}");
+            if candidate.to_lowercase().ends_with(&suffix) {
+                let end = candidate.len().saturating_sub(suffix.len());
+                candidate = candidate[..end].to_string();
+            }
+        }
+        Some(candidate)
     }
 
     pub fn toggle_current_naming_row(&mut self) {
@@ -1372,7 +1879,10 @@ mod tests {
 
         for node_id in &visible_file_nodes {
             assert!(app.tree.nodes[*node_id].selected);
-            assert!(app.selected_by_tree.contains(&app.tree.nodes[*node_id].path));
+            assert!(
+                app.selected_by_tree
+                    .contains(&app.tree.nodes[*node_id].path)
+            );
         }
     }
 
@@ -1393,7 +1903,10 @@ mod tests {
 
         for node_id in &visible_file_nodes {
             assert!(!app.tree.nodes[*node_id].selected);
-            assert!(!app.selected_by_tree.contains(&app.tree.nodes[*node_id].path));
+            assert!(
+                !app.selected_by_tree
+                    .contains(&app.tree.nodes[*node_id].path)
+            );
         }
     }
 

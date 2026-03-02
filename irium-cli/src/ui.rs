@@ -10,8 +10,8 @@ use ratatui::{
 
 use crate::{
     model::{
-        AppState, Capitalization, ClickTarget, FocusPane, InputMode, NameLength, NamingTab,
-        ScopeTab, Separator, Stage, ToastLevel,
+        AiSettingsField, AppState, Capitalization, ClickTarget, FocusPane, InputMode, NameLength,
+        NamingAiStatus, NamingTab, ScopeTab, Separator, Stage, ToastLevel,
     },
     theme::Theme,
 };
@@ -61,6 +61,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut AppState) {
     if app.mode == InputMode::NewCategory {
         draw_new_category_overlay(frame, app);
     }
+
+    if app.show_log_overlay {
+        draw_log_overlay(frame, app);
+    }
 }
 
 fn draw_minimum_size_warning(frame: &mut Frame<'_>, area: Rect) {
@@ -86,7 +90,9 @@ fn draw_stage_tabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     let title_line = Line::from(vec![
         Span::styled(
             "IRIUM",
-            Style::default().fg(title_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(title_color)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(": intelligent renamer", Style::default().fg(title_color)),
     ]);
@@ -149,7 +155,7 @@ fn draw_subtabs(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         Stage::Scope => {}
         Stage::Naming => {
             frame.render_widget(
-                Paragraph::new("Right pane: Suggestions (top) + Style Controls (bottom)")
+                Paragraph::new("Right pane: AI suggestions (top) + Style Controls (bottom)")
                     .style(Theme::muted_text()),
                 area,
             );
@@ -186,7 +192,12 @@ fn draw_scope_left(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .split(inner);
 
     if sections[0].height > 0 && sections[0].width > 0 {
-        draw_scope_select(frame, app, sections[0], app.focus == FocusPane::ScopeCategory);
+        draw_scope_select(
+            frame,
+            app,
+            sections[0],
+            app.focus == FocusPane::ScopeCategory,
+        );
     }
 
     let files_focus = app.focus == FocusPane::ScopeFiles;
@@ -219,8 +230,10 @@ fn draw_scope_left(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         draw_scope_files(frame, app, files_inner);
     }
 
-    app.click_regions
-        .register(sections[0], ClickTarget::ScopePane(FocusPane::ScopeCategory));
+    app.click_regions.register(
+        sections[0],
+        ClickTarget::ScopePane(FocusPane::ScopeCategory),
+    );
     app.click_regions
         .register(sections[1], ClickTarget::ScopePane(FocusPane::ScopeFiles));
 }
@@ -360,7 +373,8 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             line.push(Span::raw(" !"));
         }
 
-        let style = if idx == app.tree.cursor || app.scope_files_focus_nodes.contains(&row.node_id) {
+        let style = if idx == app.tree.cursor || app.scope_files_focus_nodes.contains(&row.node_id)
+        {
             Theme::selected_row()
         } else {
             Theme::panel()
@@ -463,10 +477,7 @@ fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect, focu
         .saturating_sub(gap as u16) as usize;
 
     let header = Line::from(vec![
-        Span::styled(
-            fit_to_width("Category", left_width),
-            Theme::accent_text(),
-        ),
+        Span::styled(fit_to_width("Category", left_width), Theme::accent_text()),
         Span::raw("  "),
         Span::styled(
             fit_to_width("Extensions", right_width),
@@ -510,10 +521,7 @@ fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect, focu
         }
     }
 
-    frame.render_widget(
-        List::new(items),
-        sections[1],
-    );
+    frame.render_widget(List::new(items), sections[1]);
 }
 
 fn fit_to_width(text: &str, width: usize) -> String {
@@ -537,7 +545,11 @@ fn fit_to_width(text: &str, width: usize) -> String {
 
 fn node_icon(node: &crate::model::FileNode) -> &'static str {
     if node.is_dir {
-        return if node.expanded { "\u{f07c}" } else { "\u{f07b}" };
+        return if node.expanded {
+            "\u{f07c}"
+        } else {
+            "\u{f07b}"
+        };
     }
 
     let ext = node
@@ -747,9 +759,32 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     {
         let mark = if row.selected { "[x]" } else { "[ ]" };
         let conflict = if row.conflict { " ⚠" } else { "" };
+        let row_option_index = app
+            .suggestion_set
+            .as_ref()
+            .and_then(|set| {
+                if set.per_path_options.contains_key(&row.path) {
+                    Some(
+                        set.per_path_override_index
+                            .get(&row.path)
+                            .copied()
+                            .unwrap_or(set.global_option_index)
+                            .min(2),
+                    )
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+        let option_suffix = format!(
+            " [1{}][2{}][3{}]",
+            if row_option_index == 0 { "*" } else { "" },
+            if row_option_index == 1 { "*" } else { "" },
+            if row_option_index == 2 { "*" } else { "" }
+        );
         let line = format!(
-            "{mark} G{} {} -> {}{conflict}",
-            row.group_id, row.current_name, row.proposed_name
+            "{mark} G{} {} -> {}{}{}",
+            row.group_id, row.current_name, row.proposed_name, option_suffix, conflict
         );
         let style = if idx == app.rename_cursor {
             Theme::selected_row()
@@ -763,6 +798,30 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             Rect::new(inner.x, y, inner.width, 1),
             ClickTarget::NamingRow(idx),
         );
+        if inner.width >= 14 {
+            let start = inner.x + inner.width.saturating_sub(14);
+            app.click_regions.register(
+                Rect::new(start, y, 4, 1),
+                ClickTarget::NamingRowSuggestionOption {
+                    row_index: idx,
+                    option_index: 0,
+                },
+            );
+            app.click_regions.register(
+                Rect::new(start + 4, y, 4, 1),
+                ClickTarget::NamingRowSuggestionOption {
+                    row_index: idx,
+                    option_index: 1,
+                },
+            );
+            app.click_regions.register(
+                Rect::new(start + 8, y, 4, 1),
+                ClickTarget::NamingRowSuggestionOption {
+                    row_index: idx,
+                    option_index: 2,
+                },
+            );
+        }
     }
 
     frame.render_widget(List::new(items), inner);
@@ -782,34 +841,103 @@ fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         Block::default()
             .title("Suggestions")
             .borders(Borders::ALL)
-            .border_style(if app.focus == FocusPane::NamingRight
-                && app.naming_tab == NamingTab::Suggestions
-            {
-                Theme::accent_text()
-            } else {
-                Theme::muted_text()
-            }),
+            .border_style(
+                if app.focus == FocusPane::NamingRight && app.naming_tab == NamingTab::Suggestions {
+                    Theme::accent_text()
+                } else {
+                    Theme::muted_text()
+                },
+            ),
         sections[0],
     );
     let sugg_inner = inner_rect(sections[0]);
+    let settings_label = "\u{f013} [m] [r]";
+    if sections[0].width > settings_label.chars().count() as u16 + 2 {
+        let icon_x = sections[0]
+            .x
+            .saturating_add(sections[0].width)
+            .saturating_sub(settings_label.chars().count() as u16 + 1);
+        let icon_area = Rect::new(
+            icon_x,
+            sections[0].y,
+            settings_label.chars().count() as u16,
+            1,
+        );
+        let line = Line::from(vec![
+            Span::styled("\u{f013}", Theme::accent_text()),
+            Span::raw(" [m] [r]"),
+        ]);
+        frame.render_widget(Paragraph::new(line), icon_area);
+        let m_area = Rect::new(icon_x, sections[0].y, 5, 1);
+        let r_area = Rect::new(icon_x + 6, sections[0].y, 4, 1);
+        app.click_regions
+            .register(m_area, ClickTarget::NamingSuggestionsSettingsButton);
+        app.click_regions
+            .register(r_area, ClickTarget::NamingSuggestionsRefreshButton);
+    }
+
+    let list_area = if app.ai_settings.popup_open {
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
+            .split(sugg_inner);
+        draw_naming_ai_settings_popup(frame, app, split[0]);
+        split[1]
+    } else {
+        sugg_inner
+    };
     let mut suggestion_items = Vec::new();
+    let status_line = format!(
+        "Status: {}",
+        match app.naming_ai_status {
+            NamingAiStatus::Idle => "Idle",
+            NamingAiStatus::NeedsConfig => "Needs config (m)",
+            NamingAiStatus::DiscoveringModels => "Discovering models...",
+            NamingAiStatus::AnalyzingFiles => "Analyzing files...",
+            NamingAiStatus::Generating => "Generating suggestions...",
+            NamingAiStatus::Ready => "Ready",
+            NamingAiStatus::Error => "Error",
+        }
+    );
+    suggestion_items.push(ListItem::new(status_line).style(Theme::muted_text()));
+    if let Some(set) = &app.suggestion_set {
+        suggestion_items.push(
+            ListItem::new(format!(
+                "Model: {} (req #{})",
+                set.source_model, set.request_id
+            ))
+            .style(Theme::muted_text()),
+        );
+    } else if let Some(model) = &app.ai_settings.selected_model {
+        suggestion_items.push(ListItem::new(format!("Model: {model}")).style(Theme::muted_text()));
+    }
     for (idx, item) in app.suggestions.iter().enumerate() {
+        let marker = if app.suggestion_set.as_ref().map(|s| s.global_option_index) == Some(idx) {
+            "*"
+        } else {
+            " "
+        };
         let style = if app.naming_tab == NamingTab::Suggestions && idx == app.suggestion_cursor {
             Theme::selected_row()
         } else {
             Theme::panel()
         };
-        suggestion_items.push(ListItem::new(item.label.clone()).style(style));
+        suggestion_items.push(ListItem::new(format!("[{}] {item}", marker)).style(style));
 
-        let y = sugg_inner.y + idx as u16;
-        if y < sugg_inner.y + sugg_inner.height {
+        let y = list_area.y + (idx + 2) as u16;
+        if y < list_area.y + list_area.height {
             app.click_regions.register(
-                Rect::new(sugg_inner.x, y, sugg_inner.width, 1),
+                Rect::new(list_area.x, y, list_area.width, 1),
                 ClickTarget::NamingSuggestion(idx),
             );
         }
     }
-    frame.render_widget(List::new(suggestion_items), sugg_inner);
+    if let Some(error) = &app.naming_ai_error {
+        suggestion_items.push(
+            ListItem::new(format!("Error: {error}")).style(Style::default().fg(Theme::warning())),
+        );
+    }
+    frame.render_widget(List::new(suggestion_items), list_area);
 
     frame.render_widget(
         Block::default()
@@ -831,7 +959,11 @@ fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         format!("Separator: {}", format_separator(app.style.separator)),
         format!(
             "Keep extension: {}",
-            if app.style.keep_extension { "yes" } else { "no" }
+            if app.style.keep_extension {
+                "yes"
+            } else {
+                "no"
+            }
         ),
         format!(
             "Strip colons: {}",
@@ -857,6 +989,140 @@ fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         }
     }
     frame.render_widget(List::new(style_items), style_inner);
+}
+
+fn draw_naming_ai_settings_popup(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
+    frame.render_widget(
+        Block::default()
+            .title(" AI Settings ")
+            .borders(Borders::ALL),
+        area,
+    );
+    let inner = inner_rect(area);
+    if inner.height == 0 {
+        return;
+    }
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
+        .split(inner);
+
+    let api_label = if app.ai_settings.reveal_api_key {
+        app.ai_settings.api_key_input.clone()
+    } else {
+        mask_secret(&app.ai_settings.api_key_input)
+    };
+    let api_style = if app.ai_settings.active_field == AiSettingsField::ApiKey {
+        Theme::accent_text()
+    } else {
+        Theme::panel()
+    };
+    frame.render_widget(
+        Paragraph::new(format!("API key: {api_label}")).style(api_style),
+        rows[0],
+    );
+    app.click_regions
+        .register(rows[0], ClickTarget::NamingAiSettingsApiKeyField);
+
+    let reveal_line = format!(
+        "[{}] Reveal key",
+        if app.ai_settings.reveal_api_key {
+            "x"
+        } else {
+            " "
+        }
+    );
+    frame.render_widget(
+        Paragraph::new(reveal_line).style(Theme::muted_text()),
+        rows[1],
+    );
+    app.click_regions
+        .register(rows[1], ClickTarget::NamingAiSettingsToggleReveal);
+
+    let search_style = if app.ai_settings.active_field == AiSettingsField::ModelSearch {
+        Theme::accent_text()
+    } else {
+        Theme::panel()
+    };
+    frame.render_widget(
+        Paragraph::new(format!("Search: {}", app.ai_settings.model_search_query))
+            .style(search_style),
+        rows[2],
+    );
+    app.click_regions
+        .register(rows[2], ClickTarget::NamingAiSettingsModelSearchField);
+
+    let manual_style = if app.ai_settings.active_field == AiSettingsField::ManualModel {
+        Theme::accent_text()
+    } else {
+        Theme::panel()
+    };
+    frame.render_widget(
+        Paragraph::new(format!("Model: {}", app.ai_settings.manual_model_input))
+            .style(manual_style),
+        rows[3],
+    );
+    app.click_regions
+        .register(rows[3], ClickTarget::NamingAiSettingsManualModelField);
+
+    let list_area = rows[4];
+    let filtered = app.filtered_ai_models();
+    let mut items = Vec::new();
+    items.push(ListItem::new(
+        "[d] Discover models   [s] Save   [c] Clear key",
+    ));
+    for (idx, (_source_idx, model)) in filtered
+        .iter()
+        .enumerate()
+        .take((list_area.height as usize).saturating_sub(1))
+    {
+        let selected = idx == app.ai_settings.model_list_cursor;
+        let style = if selected {
+            Theme::selected_row()
+        } else {
+            Theme::panel()
+        };
+        let ctx = model
+            .context_length
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let price = match (&model.pricing_prompt, &model.pricing_completion) {
+            (Some(p), Some(c)) => format!(" p:{p} c:{c}"),
+            _ => String::new(),
+        };
+        items.push(
+            ListItem::new(format!(
+                "{} ({}) ctx:{}{}",
+                model.name, model.id, ctx, price
+            ))
+            .style(style),
+        );
+        let y = list_area.y + idx as u16 + 1;
+        app.click_regions.register(
+            Rect::new(list_area.x, y, list_area.width, 1),
+            ClickTarget::NamingAiSettingsModelRow(idx),
+        );
+    }
+    frame.render_widget(List::new(items), list_area);
+    app.click_regions.register(
+        Rect::new(list_area.x, list_area.y, 12, 1),
+        ClickTarget::NamingAiSettingsDiscoverModels,
+    );
+    app.click_regions.register(
+        Rect::new(list_area.x + 15, list_area.y, 8, 1),
+        ClickTarget::NamingAiSettingsSaveConfig,
+    );
+    app.click_regions.register(
+        Rect::new(list_area.x + 26, list_area.y, 12, 1),
+        ClickTarget::NamingAiSettingsClearApiKey,
+    );
 }
 
 fn draw_command_box(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
@@ -997,7 +1263,7 @@ fn draw_footer(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
     let hints = match app.stage {
         Stage::Scope => "Scope: arrows/space, left/right expand, ctrl+arrows deep expand, t subtab",
         Stage::Naming => {
-            "Naming: space select row, e edit, g assign group, / style command, t subtab"
+            "Naming: r refresh, m settings, 1-3 row options, / style command, t subtab"
         }
         Stage::Apply => "Apply: Enter submit+exit | Ctrl+Enter submit+stay (simulated)",
     };
@@ -1086,6 +1352,41 @@ fn draw_new_category_overlay(frame: &mut Frame<'_>, app: &AppState) {
     );
 }
 
+fn draw_log_overlay(frame: &mut Frame<'_>, app: &mut AppState) {
+    let area = center(frame.area(), 88, 72);
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title("Logs (L to close)")
+        .borders(Borders::ALL)
+        .border_style(Theme::accent_text());
+    frame.render_widget(block, area);
+    let inner = inner_rect(area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    if app.logs.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No logs yet.")
+                .style(Theme::muted_text())
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    }
+
+    let visible = inner.height as usize;
+    app.log_view_height = visible;
+    let max_start = app.logs.len().saturating_sub(visible);
+    let start = app.log_scroll.min(max_start);
+    let end = (start + visible).min(app.logs.len());
+    let mut items = Vec::new();
+    for line in app.logs.iter().skip(start).take(end - start) {
+        items.push(ListItem::new(line.as_str()).style(Theme::panel()));
+    }
+    frame.render_widget(List::new(items), inner);
+}
+
 fn format_length(length: NameLength) -> &'static str {
     match length {
         NameLength::Long => "long",
@@ -1108,6 +1409,13 @@ fn format_separator(separator: Separator) -> &'static str {
         Separator::Dash => "dash",
         Separator::Underscore => "underscore",
     }
+}
+
+fn mask_secret(value: &str) -> String {
+    if value.is_empty() {
+        return "<empty>".to_string();
+    }
+    "•".repeat(value.chars().count().min(32))
 }
 
 fn focus_block<'a>(title: &'a str, focused: bool) -> Block<'a> {
