@@ -36,6 +36,7 @@ pub enum Action {
     SelectAllVisibleFiles,
     ToggleFilesSettingsPopup,
     ToggleShowSelectedCategoriesOnly,
+    ToggleFilesPreview,
     TriggerNamingSuggestionsRefresh,
     ToggleNamingSuggestionsSettings,
     DiscoverModels,
@@ -134,6 +135,14 @@ pub fn reduce(app: &mut AppState, action: Action) {
                 && app.focus == FocusPane::ScopeFiles
             {
                 app.toggle_show_selected_categories_only();
+            }
+        }
+        Action::ToggleFilesPreview => {
+            if app.stage == Stage::Scope
+                && app.scope_tab == ScopeTab::Files
+                && app.focus == FocusPane::ScopeFiles
+            {
+                app.toggle_files_preview();
             }
         }
         Action::TriggerNamingSuggestionsRefresh => {
@@ -291,6 +300,7 @@ pub fn reduce(app: &mut AppState, action: Action) {
         Action::MouseScrollLeft(col, row) => handle_mouse_hscroll(app, col, row, true),
         Action::MouseScrollRight(col, row) => handle_mouse_hscroll(app, col, row, false),
     }
+    app.sync_files_preview_with_focus();
 }
 
 fn handle_left(app: &mut AppState) {

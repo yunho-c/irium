@@ -286,6 +286,16 @@ fn map_normal_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
         && app.scope_tab == ScopeTab::Files
         && app.focus == FocusPane::ScopeFiles
     {
+        return vec![Action::ToggleFilesPreview];
+    }
+    if !key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        && matches!(key.code, KeyCode::Char('f') | KeyCode::Char('F'))
+        && app.stage == Stage::Scope
+        && app.scope_tab == ScopeTab::Files
+        && app.focus == FocusPane::ScopeFiles
+    {
         return vec![Action::ToggleShowSelectedCategoriesOnly];
     }
 
@@ -448,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn v_maps_to_toggle_selected_categories_visibility_in_scope_files() {
+    fn v_maps_to_toggle_files_preview_in_scope_files() {
         let cwd = std::env::current_dir().expect("cwd");
         let mut app = crate::model::AppState::new(cwd);
         app.set_stage(Stage::Scope);
@@ -456,6 +466,19 @@ mod tests {
         app.set_focus(FocusPane::ScopeFiles);
 
         let event = Event::Key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
+        let actions = map_event(&app, event);
+        assert!(matches!(actions.as_slice(), [Action::ToggleFilesPreview]));
+    }
+
+    #[test]
+    fn f_maps_to_toggle_selected_categories_visibility_in_scope_files() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = crate::model::AppState::new(cwd);
+        app.set_stage(Stage::Scope);
+        app.set_scope_tab(ScopeTab::Files);
+        app.set_focus(FocusPane::ScopeFiles);
+
+        let event = Event::Key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
         let actions = map_event(&app, event);
         assert!(matches!(
             actions.as_slice(),

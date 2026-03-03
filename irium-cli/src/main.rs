@@ -6,6 +6,7 @@ mod fs_scan;
 mod input;
 mod mock;
 mod model;
+mod preview;
 mod theme;
 mod ui;
 
@@ -32,6 +33,7 @@ fn main() -> io::Result<()> {
     let mut app = AppState::new(std::env::current_dir()?);
     let result = run_app(&mut terminal, &mut app);
     app.shutdown_ai_worker();
+    app.shutdown_preview_worker();
     restore_terminal(&mut terminal)?;
     result
 }

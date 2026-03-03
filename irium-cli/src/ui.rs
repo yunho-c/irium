@@ -10,11 +10,12 @@ use ratatui::{
         ScrollbarState, Tabs, Wrap,
     },
 };
+use ratatui_image::{Resize, StatefulImage};
 
 use crate::{
     model::{
-        AiSettingsField, AppState, Capitalization, ClickTarget, FocusPane, InputMode, NameLength,
-        NamingAiStatus, NamingTab, ScopeTab, Separator, Stage, ToastLevel,
+        AiSettingsField, AppState, Capitalization, ClickTarget, FilesPreviewStatus, FocusPane,
+        InputMode, NameLength, NamingAiStatus, NamingTab, ScopeTab, Separator, Stage, ToastLevel,
     },
     theme::Theme,
 };
@@ -184,7 +185,16 @@ fn draw_scope(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .split(area);
 
     draw_scope_left(frame, app, split[0]);
-    draw_scope_right(frame, app, split[1]);
+    if app.files_preview_visible && app.scope_tab == ScopeTab::Files {
+        let right = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+            .split(split[1]);
+        draw_scope_right(frame, app, right[0]);
+        draw_scope_preview(frame, app, right[1]);
+    } else {
+        draw_scope_right(frame, app, split[1]);
+    }
 }
 
 fn draw_scope_left(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
@@ -301,6 +311,86 @@ fn draw_scope_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
     app.click_regions
         .register(layout[1], ClickTarget::ScopePane(FocusPane::ScopeOptions));
+}
+
+fn draw_scope_preview(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
+    frame.render_widget(focus_block("Preview", false), area);
+    let inner = inner_rect(area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    match app.files_preview_status {
+        FilesPreviewStatus::Ready => {
+            if let Some(protocol) = app.files_preview_protocol.as_mut() {
+                frame.render_stateful_widget(
+                    StatefulImage::default().resize(Resize::Fit(None)),
+                    inner,
+                    protocol,
+                );
+                if let Some(error) = protocol.last_encoding_result().and_then(Result::err) {
+                    app.files_preview_status = FilesPreviewStatus::Error;
+                    app.files_preview_error = Some(format!("Preview render error: {error}"));
+                    app.files_preview_protocol = None;
+                }
+            } else {
+                frame.render_widget(
+                    Paragraph::new("Preview data is not available yet.")
+                        .style(Theme::muted_text())
+                        .wrap(Wrap { trim: true }),
+                    inner,
+                );
+            }
+        }
+        FilesPreviewStatus::Loading => {
+            frame.render_widget(
+                Paragraph::new("Loading preview...")
+                    .style(Theme::muted_text())
+                    .wrap(Wrap { trim: true }),
+                inner,
+            );
+        }
+        FilesPreviewStatus::Unsupported => {
+            let message = app
+                .files_preview_error
+                .as_deref()
+                .unwrap_or("Preview is not supported for this item.");
+            frame.render_widget(
+                Paragraph::new(message)
+                    .style(Theme::muted_text())
+                    .wrap(Wrap { trim: true }),
+                inner,
+            );
+        }
+        FilesPreviewStatus::Error => {
+            let message = app
+                .files_preview_error
+                .as_deref()
+                .unwrap_or("Failed to render preview.");
+            frame.render_widget(
+                Paragraph::new(message)
+                    .style(Style::default().fg(Theme::error()))
+                    .wrap(Wrap { trim: true }),
+                inner,
+            );
+        }
+        FilesPreviewStatus::Empty => {
+            frame.render_widget(
+                Paragraph::new("Move focus in Files to preview images and PDFs.")
+                    .style(Theme::muted_text())
+                    .wrap(Wrap { trim: true }),
+                inner,
+            );
+        }
+        FilesPreviewStatus::Hidden => {
+            frame.render_widget(
+                Paragraph::new("Press v in Files to toggle preview.")
+                    .style(Theme::muted_text())
+                    .wrap(Wrap { trim: true }),
+                inner,
+            );
+        }
+    }
 }
 
 fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
@@ -483,7 +573,7 @@ fn draw_files_settings_popup(frame: &mut Frame<'_>, app: &mut AppState, area: Re
     } else {
         "[ ]"
     };
-    let row = format!("{mark} Show selected categories only [v]");
+    let row = format!("{mark} Show selected categories only [f]");
     frame.render_widget(Paragraph::new(row).style(Theme::panel()), inner);
     app.click_regions.register(
         Rect::new(inner.x, inner.y, inner.width, 1),
@@ -1310,7 +1400,9 @@ fn draw_apply_history(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
 fn draw_footer(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
     let hints = match app.stage {
-        Stage::Scope => "Scope: arrows/space, left/right expand, ctrl+arrows deep expand, t subtab",
+        Stage::Scope => {
+            "Scope: arrows/space, left/right expand, ctrl+arrows deep expand, f filter, v preview, t subtab"
+        }
         Stage::Naming => "Naming: r refresh, m settings, p prompt history, / prompt, t subtab",
         Stage::Apply => "Apply: Enter submit+exit | Ctrl+Enter submit+stay (simulated)",
     };

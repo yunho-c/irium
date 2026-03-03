@@ -7,6 +7,7 @@ use std::{
 
 use arboard::Clipboard;
 use ratatui::{layout::Rect, text::Line};
+use ratatui_image::picker::Picker;
 use tachyonfx::{Interpolation, fx, pattern::SweepPattern};
 
 use crate::{
@@ -20,10 +21,15 @@ use crate::{
     fs_scan::{self, FsEntry},
     mock,
     model::{
-        AiSettingsField, AiSettingsState, AppState, CategoryFilter, FileNode, FileTree, FocusPane,
-        InputMode, MarketplacePreset, NamingAiStatus, NamingTab, PresetState, RenameRow,
-        ScopeFilesScrollbarGeometry, ScopeTab, SessionUndoEntry, SizeConstraint, Stage,
-        StyleOptions, SuggestionSet, TimeConstraint, Toast, ToastLevel, VisibleNode,
+        AiSettingsField, AiSettingsState, AppState, CategoryFilter, FileNode, FileTree,
+        FilesPreviewStatus, FocusPane, InputMode, MarketplacePreset, NamingAiStatus, NamingTab,
+        PresetState, RenameRow, ScopeFilesScrollbarGeometry, ScopeTab, SessionUndoEntry,
+        SizeConstraint, Stage, StyleOptions, SuggestionSet, TimeConstraint, Toast, ToastLevel,
+        VisibleNode,
+    },
+    preview::{
+        self, PreviewKind,
+        worker::{PreviewWorkerCommand, PreviewWorkerEvent},
     },
 };
 
@@ -57,6 +63,11 @@ impl AppState {
             Ok((tx, rx)) => (Some(tx), Some(rx)),
             Err(_) => (None, None),
         };
+        let (files_preview_worker_tx, files_preview_worker_rx) =
+            match preview::worker::spawn_worker() {
+                Ok((tx, rx)) => (Some(tx), Some(rx)),
+                Err(_) => (None, None),
+            };
         if ai_settings.selected_model.is_none() {
             ai_settings.manual_model_input = "google/gemini-2.0-flash-001".to_string();
         }
@@ -75,6 +86,17 @@ impl AppState {
             show_hidden: false,
             files_settings_open: false,
             show_selected_categories_only: false,
+            files_preview_visible: false,
+            files_preview_status: FilesPreviewStatus::Hidden,
+            files_preview_target: None,
+            files_preview_error: None,
+            files_preview_source_meta: None,
+            files_preview_protocol: None,
+            files_preview_picker: None,
+            files_preview_next_request_id: 1,
+            files_preview_active_request_id: None,
+            files_preview_worker_tx,
+            files_preview_worker_rx,
             tree,
             scan_error: None,
             category_filters: mock::default_category_filters(),
@@ -128,7 +150,7 @@ impl AppState {
                 Line::from("Global: q quit | [ / ] stage | Tab focus | ? help"),
                 Line::from("Global: L logs overlay"),
                 Line::from(
-                    "Files: arrows move | Space select | A select-all | p settings | v toggle category-filter",
+                    "Files: arrows move | Space select | A select-all | p settings | f category-filter | v preview",
                 ),
                 Line::from(
                     "Naming: r refresh AI | m suggestions settings | p prompt history | 1-3 row option | / prompt",
@@ -289,6 +311,7 @@ impl AppState {
     pub fn tick(&mut self) {
         self.ticks = self.ticks.saturating_add(1);
         self.poll_ai_events();
+        self.poll_files_preview_events();
         for toast in &mut self.toasts {
             toast.ttl_ticks = toast.ttl_ticks.saturating_sub(1);
         }
@@ -298,6 +321,12 @@ impl AppState {
     pub fn shutdown_ai_worker(&mut self) {
         if let Some(tx) = &self.ai_worker_tx {
             let _ = tx.send(AiWorkerCommand::Shutdown);
+        }
+    }
+
+    pub fn shutdown_preview_worker(&mut self) {
+        if let Some(tx) = &self.files_preview_worker_tx {
+            let _ = tx.send(PreviewWorkerCommand::Shutdown);
         }
     }
 
@@ -717,6 +746,103 @@ impl AppState {
                 "Files view: showing all categories"
             },
         );
+    }
+
+    pub fn toggle_files_preview(&mut self) {
+        self.files_preview_visible = !self.files_preview_visible;
+        if self.files_preview_visible {
+            self.files_preview_status = FilesPreviewStatus::Empty;
+            self.files_preview_target = None;
+            self.files_preview_error = None;
+            self.files_preview_source_meta = None;
+            self.files_preview_protocol = None;
+        } else {
+            self.files_preview_status = FilesPreviewStatus::Hidden;
+            self.files_preview_target = None;
+            self.files_preview_error = None;
+            self.files_preview_source_meta = None;
+            self.files_preview_protocol = None;
+            self.files_preview_active_request_id = None;
+        }
+    }
+
+    pub fn sync_files_preview_with_focus(&mut self) {
+        if !self.files_preview_visible {
+            return;
+        }
+
+        if self.stage != Stage::Scope || self.scope_tab != ScopeTab::Files {
+            self.files_preview_status = FilesPreviewStatus::Empty;
+            self.files_preview_target = None;
+            self.files_preview_error = None;
+            self.files_preview_source_meta = None;
+            self.files_preview_protocol = None;
+            self.files_preview_active_request_id = None;
+            return;
+        }
+
+        let Some(node_id) = self.current_scope_file_node_id() else {
+            self.files_preview_status = FilesPreviewStatus::Empty;
+            self.files_preview_target = None;
+            self.files_preview_error = None;
+            self.files_preview_source_meta = None;
+            self.files_preview_protocol = None;
+            self.files_preview_active_request_id = None;
+            return;
+        };
+
+        if self.tree.nodes[node_id].is_dir {
+            self.files_preview_status = FilesPreviewStatus::Unsupported;
+            self.files_preview_target = Some(self.tree.nodes[node_id].path.clone());
+            self.files_preview_error = Some("Folder preview is not supported".to_string());
+            self.files_preview_source_meta = Some(preview::PreviewSourceMeta {
+                kind: PreviewKind::Unsupported,
+                width: 0,
+                height: 0,
+                pdf_page: None,
+            });
+            self.files_preview_protocol = None;
+            self.files_preview_active_request_id = None;
+            return;
+        }
+
+        let path = self.tree.nodes[node_id].path.clone();
+        if self.files_preview_target.as_ref() == Some(&path)
+            && matches!(
+                self.files_preview_status,
+                FilesPreviewStatus::Loading
+                    | FilesPreviewStatus::Ready
+                    | FilesPreviewStatus::Unsupported
+                    | FilesPreviewStatus::Error
+            )
+        {
+            return;
+        }
+
+        self.request_files_preview_for_path(path);
+    }
+
+    fn request_files_preview_for_path(&mut self, path: PathBuf) {
+        let request_id = self.next_files_preview_request_id();
+        self.files_preview_target = Some(path.clone());
+        self.files_preview_active_request_id = Some(request_id);
+        self.files_preview_status = FilesPreviewStatus::Loading;
+        self.files_preview_error = None;
+        self.files_preview_source_meta = None;
+        self.files_preview_protocol = None;
+
+        if let Some(tx) = &self.files_preview_worker_tx {
+            let _ = tx.send(PreviewWorkerCommand::GeneratePreview { request_id, path });
+        } else {
+            self.files_preview_status = FilesPreviewStatus::Error;
+            self.files_preview_error = Some("Preview worker is not available".to_string());
+        }
+    }
+
+    fn next_files_preview_request_id(&mut self) -> u64 {
+        let id = self.files_preview_next_request_id;
+        self.files_preview_next_request_id = self.files_preview_next_request_id.saturating_add(1);
+        id
     }
 
     fn node_matches_selected_categories(&self, node_id: usize) -> bool {
@@ -1759,6 +1885,119 @@ impl AppState {
                 }
             }
         }
+    }
+
+    fn poll_files_preview_events(&mut self) {
+        loop {
+            let next = self
+                .files_preview_worker_rx
+                .as_ref()
+                .map(|rx| rx.try_recv());
+            let Some(result) = next else {
+                return;
+            };
+            match result {
+                Ok(event) => self.handle_files_preview_event(event),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    if self.files_preview_visible {
+                        self.files_preview_status = FilesPreviewStatus::Error;
+                        self.files_preview_error = Some("Preview worker disconnected".to_string());
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    fn handle_files_preview_event(&mut self, event: PreviewWorkerEvent) {
+        match event {
+            PreviewWorkerEvent::PreviewReady {
+                request_id,
+                path,
+                image,
+                meta,
+            } => {
+                if Some(request_id) != self.files_preview_active_request_id {
+                    return;
+                }
+                if self.files_preview_target.as_ref() != Some(&path) {
+                    return;
+                }
+
+                self.ensure_files_preview_picker();
+                let Some(picker) = self.files_preview_picker.as_ref() else {
+                    self.files_preview_status = FilesPreviewStatus::Error;
+                    self.files_preview_error =
+                        Some("Could not initialize terminal image preview".to_string());
+                    return;
+                };
+
+                self.files_preview_protocol = Some(picker.new_resize_protocol(image));
+                self.files_preview_source_meta = Some(meta);
+                self.files_preview_status = FilesPreviewStatus::Ready;
+                self.files_preview_error = None;
+            }
+            PreviewWorkerEvent::PreviewUnsupported {
+                request_id,
+                path,
+                reason,
+            } => {
+                if Some(request_id) != self.files_preview_active_request_id {
+                    return;
+                }
+                if self.files_preview_target.as_ref() != Some(&path) {
+                    return;
+                }
+                self.files_preview_protocol = None;
+                self.files_preview_source_meta = Some(preview::PreviewSourceMeta {
+                    kind: PreviewKind::Unsupported,
+                    width: 0,
+                    height: 0,
+                    pdf_page: None,
+                });
+                self.files_preview_status = FilesPreviewStatus::Unsupported;
+                self.files_preview_error = Some(reason);
+            }
+            PreviewWorkerEvent::PreviewError {
+                request_id,
+                path,
+                message,
+            } => {
+                if Some(request_id) != self.files_preview_active_request_id {
+                    return;
+                }
+                if self.files_preview_target.as_ref() != Some(&path) {
+                    return;
+                }
+                self.append_log(
+                    "WARN",
+                    &format!("Preview failed for {}: {message}", path.display()),
+                );
+                self.files_preview_protocol = None;
+                self.files_preview_source_meta = None;
+                self.files_preview_status = FilesPreviewStatus::Error;
+                self.files_preview_error = Some(message);
+            }
+        }
+    }
+
+    fn ensure_files_preview_picker(&mut self) {
+        if self.files_preview_picker.is_some() {
+            return;
+        }
+
+        let picker = match Picker::from_query_stdio() {
+            Ok(picker) => picker,
+            Err(error) => {
+                self.append_log(
+                    "WARN",
+                    &format!("Preview protocol query failed; falling back to halfblocks: {error}"),
+                );
+                Picker::halfblocks()
+            }
+        };
+        self.files_preview_picker = Some(picker);
     }
 
     fn handle_ai_event(&mut self, event: AiWorkerEvent) {

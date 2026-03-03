@@ -33,7 +33,8 @@ The app scans the current working directory and opens a three-stage TUI:
 - `Space`: toggle select/filter item
 - `A`: toggle select/deselect all visible files in the Files section (respects active Files filters/settings)
 - `p`: open/close Files settings popup
-- `v`: toggle `Show selected categories only` (Files section)
+- `f`: toggle `Show selected categories only` (Files section)
+- `v`: toggle preview pane (Files section)
 - `Right`: expand folder (Files tab)
 - `Left`: collapse folder (Files tab)
 - `Ctrl+Right`: expand subtree recursively (Files tab)
@@ -81,4 +82,6 @@ The app scans the current working directory and opens a three-stage TUI:
 - API key and selected model are persisted in local config (`~/.config/irium/config.toml` on macOS/Linux) with best-effort secure permissions.
 - Prompt history is persisted separately in local data storage (`.../irium/prompt_history.json`) and is not stored in `config.toml`.
 - Undo history is in-memory for the current session only.
+- Scope preview currently supports image files and first-page PDF previews only.
+- Image preview protocol support depends on the active terminal; the app falls back to halfblocks rendering when needed.
 - Mouse support is basic (`click`, `scroll`) and does not include range multi-select gestures.

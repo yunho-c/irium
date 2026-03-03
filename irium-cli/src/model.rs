@@ -7,12 +7,17 @@ use std::{
 };
 
 use ratatui::{layout::Rect, text::Line};
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 use ratatui_interact::{state::FocusManager, traits::ClickRegionRegistry};
 use tachyonfx::Effect;
 
 use crate::ai::{
     ModelListItem,
     worker::{AiWorkerCommand, AiWorkerEvent},
+};
+use crate::preview::{
+    PreviewSourceMeta,
+    worker::{PreviewWorkerCommand, PreviewWorkerEvent},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -507,6 +512,16 @@ pub enum NamingAiStatus {
     Error,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilesPreviewStatus {
+    Hidden,
+    Empty,
+    Loading,
+    Ready,
+    Unsupported,
+    Error,
+}
+
 #[derive(Debug, Clone)]
 pub struct SuggestionSet {
     pub request_id: u64,
@@ -588,7 +603,6 @@ impl ScopeFilesScrollbarGeometry {
     }
 }
 
-#[derive(Debug)]
 pub struct AppState {
     pub cwd: PathBuf,
     pub stage: Stage,
@@ -604,6 +618,17 @@ pub struct AppState {
     pub show_hidden: bool,
     pub files_settings_open: bool,
     pub show_selected_categories_only: bool,
+    pub files_preview_visible: bool,
+    pub files_preview_status: FilesPreviewStatus,
+    pub files_preview_target: Option<PathBuf>,
+    pub files_preview_error: Option<String>,
+    pub files_preview_source_meta: Option<PreviewSourceMeta>,
+    pub files_preview_protocol: Option<StatefulProtocol>,
+    pub files_preview_picker: Option<Picker>,
+    pub files_preview_next_request_id: u64,
+    pub files_preview_active_request_id: Option<u64>,
+    pub files_preview_worker_tx: Option<Sender<PreviewWorkerCommand>>,
+    pub files_preview_worker_rx: Option<Receiver<PreviewWorkerEvent>>,
 
     pub tree: FileTree,
     pub scan_error: Option<String>,
