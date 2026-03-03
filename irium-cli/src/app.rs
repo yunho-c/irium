@@ -6,7 +6,7 @@ use std::{
 };
 
 use arboard::Clipboard;
-use ratatui::text::Line;
+use ratatui::{layout::Rect, text::Line};
 use tachyonfx::{Interpolation, fx, pattern::SweepPattern};
 
 use crate::{
@@ -21,9 +21,9 @@ use crate::{
     mock,
     model::{
         AiSettingsField, AiSettingsState, AppState, CategoryFilter, FileNode, FileTree, FocusPane,
-        InputMode, MarketplacePreset, NamingAiStatus, NamingTab, PresetState, RenameRow, ScopeTab,
-        SessionUndoEntry, SizeConstraint, Stage, StyleOptions, SuggestionSet, TimeConstraint,
-        Toast, ToastLevel, VisibleNode,
+        InputMode, MarketplacePreset, NamingAiStatus, NamingTab, PresetState, RenameRow,
+        ScopeFilesScrollbarGeometry, ScopeTab, SessionUndoEntry, SizeConstraint, Stage,
+        StyleOptions, SuggestionSet, TimeConstraint, Toast, ToastLevel, VisibleNode,
     },
 };
 
@@ -140,6 +140,7 @@ impl AppState {
             category_match_dirs: HashSet::new(),
             scope_files_focus_nodes: HashSet::new(),
             scope_files_drag: None,
+            scope_files_scrollbar: None,
             title_startup_fx: Some(
                 fx::hsl_shift(
                     Some([120.0, 25.0, 25.0]),
@@ -583,10 +584,122 @@ impl AppState {
         if len == 0 {
             self.tree.cursor = 0;
             self.tree.scroll = 0;
+            self.scope_files_scrollbar = None;
             return;
         }
         self.tree.cursor = self.tree.cursor.min(len - 1);
         self.tree.scroll = self.tree.scroll.min(self.tree.cursor);
+    }
+
+    pub fn clear_scope_files_scrollbar(&mut self) {
+        self.scope_files_scrollbar = None;
+    }
+
+    pub fn set_scope_files_scrollbar_geometry(
+        &mut self,
+        track_area: Rect,
+        content_len: usize,
+        viewport_len: usize,
+    ) {
+        if track_area.width == 0 || track_area.height == 0 || viewport_len == 0 || content_len == 0
+        {
+            self.scope_files_scrollbar = None;
+            return;
+        }
+
+        let viewport_len = viewport_len.min(content_len);
+        if content_len <= viewport_len {
+            self.scope_files_scrollbar = None;
+            return;
+        }
+
+        let track_height = track_area.height as usize;
+        let max_scroll = content_len.saturating_sub(viewport_len);
+        self.tree.scroll = self.tree.scroll.min(max_scroll);
+
+        let mut thumb_height = viewport_len
+            .saturating_mul(track_height)
+            .checked_div(content_len)
+            .unwrap_or(1);
+        thumb_height = thumb_height.max(1).min(track_height);
+        let max_thumb_top = track_height.saturating_sub(thumb_height);
+        let thumb_top = if max_scroll == 0 || max_thumb_top == 0 {
+            0
+        } else {
+            (self
+                .tree
+                .scroll
+                .saturating_mul(max_thumb_top)
+                .saturating_add(max_scroll / 2))
+                / max_scroll
+        };
+
+        self.scope_files_scrollbar = Some(ScopeFilesScrollbarGeometry {
+            track_area,
+            thumb_area: Rect::new(
+                track_area.x,
+                track_area.y.saturating_add(thumb_top as u16),
+                track_area.width,
+                thumb_height as u16,
+            ),
+            content_len,
+            viewport_len,
+            max_scroll,
+        });
+    }
+
+    fn apply_scope_files_scroll(&mut self, scroll: usize, viewport_len: usize) {
+        let len = self.scope_files_rows_len();
+        if len == 0 {
+            self.tree.cursor = 0;
+            self.tree.scroll = 0;
+            return;
+        }
+
+        let viewport = viewport_len.max(1).min(len);
+        let max_scroll = len.saturating_sub(viewport);
+        self.tree.scroll = scroll.min(max_scroll);
+
+        if self.tree.cursor < self.tree.scroll {
+            self.tree.cursor = self.tree.scroll;
+        }
+        let visible_end = self.tree.scroll.saturating_add(viewport.saturating_sub(1));
+        if self.tree.cursor > visible_end {
+            self.tree.cursor = visible_end;
+        }
+        self.normalize_scope_files_cursor();
+    }
+
+    fn recompute_scope_files_scrollbar_geometry(&mut self) {
+        let Some(geometry) = self.scope_files_scrollbar else {
+            return;
+        };
+        self.set_scope_files_scrollbar_geometry(
+            geometry.track_area,
+            geometry.content_len,
+            geometry.viewport_len,
+        );
+    }
+
+    pub fn jump_scope_files_scrollbar_to_track_row(&mut self, row: u16) {
+        let Some(geometry) = self.scope_files_scrollbar else {
+            return;
+        };
+
+        let scroll = geometry.scroll_for_track_row_centered(row);
+        self.apply_scope_files_scroll(scroll, geometry.viewport_len);
+        self.recompute_scope_files_scrollbar_geometry();
+    }
+
+    pub fn drag_scope_files_scrollbar_thumb(&mut self, row: u16, grab_offset_rows: u16) {
+        let Some(geometry) = self.scope_files_scrollbar else {
+            return;
+        };
+
+        let top_row = row.saturating_sub(grab_offset_rows);
+        let scroll = geometry.scroll_for_thumb_top_row(top_row);
+        self.apply_scope_files_scroll(scroll, geometry.viewport_len);
+        self.recompute_scope_files_scrollbar_geometry();
     }
 
     pub fn toggle_files_settings_popup(&mut self) {
@@ -2058,6 +2171,42 @@ impl AppState {
 mod tests {
     use super::*;
 
+    fn install_flat_file_tree(app: &mut AppState, file_count: usize) {
+        let mut nodes = Vec::with_capacity(file_count + 1);
+        let child_ids: Vec<usize> = (1..=file_count).collect();
+        nodes.push(FileNode {
+            parent: None,
+            path: PathBuf::from("."),
+            name: ".".to_string(),
+            is_dir: true,
+            children: child_ids.clone(),
+            children_loaded: true,
+            expanded: true,
+            selected: false,
+            unreadable: false,
+        });
+        for idx in 0..file_count {
+            nodes.push(FileNode {
+                parent: Some(0),
+                path: PathBuf::from(format!("./file-{idx}.txt")),
+                name: format!("file-{idx}.txt"),
+                is_dir: false,
+                children: Vec::new(),
+                children_loaded: false,
+                expanded: false,
+                selected: false,
+                unreadable: false,
+            });
+        }
+        app.tree = FileTree {
+            nodes,
+            root: 0,
+            cursor: 0,
+            scroll: 0,
+        };
+        app.normalize_scope_files_cursor();
+    }
+
     #[test]
     fn preset_save_load_roundtrip() {
         let cwd = std::env::current_dir().expect("cwd");
@@ -2376,5 +2525,50 @@ mod tests {
         };
 
         assert!(!app.node_selected_for_display(1));
+    }
+
+    #[test]
+    fn scope_files_scrollbar_geometry_tracks_top_middle_bottom() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = AppState::new(cwd);
+        install_flat_file_tree(&mut app, 100);
+        let track = Rect::new(0, 5, 1, 20);
+
+        app.tree.scroll = 0;
+        app.set_scope_files_scrollbar_geometry(track, 100, 10);
+        let top_y = app.scope_files_scrollbar.expect("geometry").thumb_area.y;
+
+        app.tree.scroll = 45;
+        app.set_scope_files_scrollbar_geometry(track, 100, 10);
+        let mid_y = app.scope_files_scrollbar.expect("geometry").thumb_area.y;
+
+        app.tree.scroll = 90;
+        app.set_scope_files_scrollbar_geometry(track, 100, 10);
+        let bottom = app.scope_files_scrollbar.expect("geometry");
+        let bottom_y = bottom.thumb_area.y;
+
+        assert_eq!(top_y, track.y);
+        assert!(mid_y > top_y);
+        assert!(bottom_y > mid_y);
+        assert_eq!(
+            bottom.thumb_area.y + bottom.thumb_area.height,
+            track.y + track.height
+        );
+    }
+
+    #[test]
+    fn scope_files_scrollbar_track_mapping_is_clamped() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = AppState::new(cwd);
+        install_flat_file_tree(&mut app, 100);
+        let track = Rect::new(0, 10, 1, 20);
+        app.set_scope_files_scrollbar_geometry(track, 100, 10);
+        let geometry = app.scope_files_scrollbar.expect("geometry");
+
+        let above = geometry.scroll_for_track_row_centered(track.y.saturating_sub(5));
+        let below = geometry.scroll_for_track_row_centered(track.y + track.height + 5);
+
+        assert_eq!(above, 0);
+        assert_eq!(below, geometry.max_scroll);
     }
 }

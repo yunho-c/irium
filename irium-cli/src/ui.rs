@@ -5,7 +5,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs, Wrap},
+    widgets::{
+        Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Tabs, Wrap,
+    },
 };
 
 use crate::{
@@ -316,6 +319,8 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         area
     };
 
+    app.clear_scope_files_scrollbar();
+
     let visible = app.scope_files_rows();
     if visible.is_empty() {
         let text = if app.show_selected_categories_only && app.selected_extensions.is_empty() {
@@ -339,7 +344,22 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         return;
     }
 
-    let list_height = list_area.height.saturating_sub(1) as usize;
+    let mut rows_area = list_area;
+    let mut list_height = rows_area.height.saturating_sub(1) as usize;
+    if list_height == 0 || rows_area.width == 0 {
+        return;
+    }
+
+    let needs_scrollbar = visible.len() > list_height;
+    let show_scrollbar = needs_scrollbar && rows_area.width > 1;
+    if show_scrollbar {
+        rows_area.width = rows_area.width.saturating_sub(1);
+        list_height = rows_area.height.saturating_sub(1) as usize;
+    }
+    if list_height == 0 || rows_area.width == 0 {
+        return;
+    }
+
     if app.tree.cursor < app.tree.scroll {
         app.tree.scroll = app.tree.cursor;
     } else if app.tree.cursor >= app.tree.scroll + list_height && list_height > 0 {
@@ -387,33 +407,33 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         };
         items.push(ListItem::new(Line::from(line)).style(style));
 
-        let y = list_area.y + (idx - app.tree.scroll) as u16;
-        let checkbox_start = indent_width.min(list_area.width);
-        let checkbox_width = if checkbox_start < list_area.width {
-            4u16.min(list_area.width - checkbox_start)
+        let y = rows_area.y + (idx - app.tree.scroll) as u16;
+        let checkbox_start = indent_width.min(rows_area.width);
+        let checkbox_width = if checkbox_start < rows_area.width {
+            4u16.min(rows_area.width - checkbox_start)
         } else {
             0
         };
 
         if checkbox_start > 0 {
             app.click_regions.register(
-                Rect::new(list_area.x, y, checkbox_start, 1),
+                Rect::new(rows_area.x, y, checkbox_start, 1),
                 ClickTarget::ScopeFileRow(idx),
             );
         }
         if checkbox_width > 0 {
             app.click_regions.register(
-                Rect::new(list_area.x + checkbox_start, y, checkbox_width, 1),
+                Rect::new(rows_area.x + checkbox_start, y, checkbox_width, 1),
                 ClickTarget::ScopeFileCheckbox(idx),
             );
         }
         let after_checkbox = checkbox_start.saturating_add(checkbox_width);
-        if after_checkbox < list_area.width {
+        if after_checkbox < rows_area.width {
             app.click_regions.register(
                 Rect::new(
-                    list_area.x + after_checkbox,
+                    rows_area.x + after_checkbox,
                     y,
-                    list_area.width - after_checkbox,
+                    rows_area.width - after_checkbox,
                     1,
                 ),
                 ClickTarget::ScopeFileRow(idx),
@@ -421,7 +441,33 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         }
     }
 
-    frame.render_widget(List::new(items), list_area);
+    frame.render_widget(List::new(items), rows_area);
+
+    if show_scrollbar {
+        let track_area = Rect::new(
+            rows_area.x + rows_area.width,
+            rows_area.y,
+            1,
+            list_height as u16,
+        );
+        app.set_scope_files_scrollbar_geometry(track_area, visible.len(), list_height);
+        if let Some(geometry) = app.scope_files_scrollbar {
+            let mut scrollbar_state = ScrollbarState::new(geometry.content_len)
+                .position(app.tree.scroll)
+                .viewport_content_length(geometry.viewport_len);
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_style(Theme::muted_text())
+                .thumb_style(Theme::accent_text());
+            frame.render_stateful_widget(scrollbar, geometry.track_area, &mut scrollbar_state);
+
+            app.click_regions
+                .register(geometry.thumb_area, ClickTarget::ScopeFilesScrollbarThumb);
+            app.click_regions
+                .register(geometry.track_area, ClickTarget::ScopeFilesScrollbarTrack);
+        }
+    }
 }
 
 fn draw_files_settings_popup(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
@@ -1540,9 +1586,47 @@ fn segment_rects(area: Rect, count: usize) -> Vec<Rect> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use ratatui::{Terminal, backend::TestBackend};
 
     use super::*;
+
+    fn install_flat_file_tree(app: &mut AppState, file_count: usize) {
+        let mut nodes = Vec::with_capacity(file_count + 1);
+        let child_ids: Vec<usize> = (1..=file_count).collect();
+        nodes.push(crate::model::FileNode {
+            parent: None,
+            path: PathBuf::from("."),
+            name: ".".to_string(),
+            is_dir: true,
+            children: child_ids.clone(),
+            children_loaded: true,
+            expanded: true,
+            selected: false,
+            unreadable: false,
+        });
+        for idx in 0..file_count {
+            nodes.push(crate::model::FileNode {
+                parent: Some(0),
+                path: PathBuf::from(format!("./file-{idx}.txt")),
+                name: format!("file-{idx}.txt"),
+                is_dir: false,
+                children: Vec::new(),
+                children_loaded: false,
+                expanded: false,
+                selected: false,
+                unreadable: false,
+            });
+        }
+        app.tree = crate::model::FileTree {
+            nodes,
+            root: 0,
+            cursor: 0,
+            scroll: 0,
+        };
+        app.normalize_scope_files_cursor();
+    }
 
     #[test]
     fn render_scope_screen_smoke() {
@@ -1575,5 +1659,57 @@ mod tests {
         terminal
             .draw(|frame| draw(frame, &mut app))
             .expect("draw should work");
+    }
+
+    #[test]
+    fn render_scope_files_registers_scrollbar_regions_on_overflow() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut app = AppState::new(std::env::current_dir().expect("cwd"));
+        app.stage = Stage::Scope;
+        install_flat_file_tree(&mut app, 300);
+
+        terminal
+            .draw(|frame| draw(frame, &mut app))
+            .expect("draw should work");
+
+        assert!(
+            app.click_regions
+                .regions()
+                .iter()
+                .any(|region| matches!(region.data, ClickTarget::ScopeFilesScrollbarTrack))
+        );
+        assert!(
+            app.click_regions
+                .regions()
+                .iter()
+                .any(|region| matches!(region.data, ClickTarget::ScopeFilesScrollbarThumb))
+        );
+    }
+
+    #[test]
+    fn render_scope_files_omits_scrollbar_regions_without_overflow() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut app = AppState::new(std::env::current_dir().expect("cwd"));
+        app.stage = Stage::Scope;
+        install_flat_file_tree(&mut app, 5);
+
+        terminal
+            .draw(|frame| draw(frame, &mut app))
+            .expect("draw should work");
+
+        assert!(
+            !app.click_regions
+                .regions()
+                .iter()
+                .any(|region| matches!(region.data, ClickTarget::ScopeFilesScrollbarTrack))
+        );
+        assert!(
+            !app.click_regions
+                .regions()
+                .iter()
+                .any(|region| matches!(region.data, ClickTarget::ScopeFilesScrollbarThumb))
+        );
     }
 }

@@ -6,7 +6,7 @@ use std::{
     time::Instant,
 };
 
-use ratatui::text::Line;
+use ratatui::{layout::Rect, text::Line};
 use ratatui_interact::{state::FocusManager, traits::ClickRegionRegistry};
 use tachyonfx::Effect;
 
@@ -421,6 +421,8 @@ pub enum ClickTarget {
     ScopeTab(ScopeTab),
     ScopeFileRow(usize),
     ScopeFileCheckbox(usize),
+    ScopeFilesScrollbarThumb,
+    ScopeFilesScrollbarTrack,
     ScopeFilesSettingsButton,
     ScopeFilesSettingShowSelectedCategoriesOnly,
     ScopeCategoryRow(usize),
@@ -523,12 +525,67 @@ pub enum FilesDragMode {
     RowFocus {
         visited_rows: HashSet<usize>,
     },
+    ScrollbarThumb {
+        grab_offset_rows: u16,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub struct FilesDragState {
     pub mode: FilesDragMode,
     pub start_index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScopeFilesScrollbarGeometry {
+    pub track_area: Rect,
+    pub thumb_area: Rect,
+    pub content_len: usize,
+    pub viewport_len: usize,
+    pub max_scroll: usize,
+}
+
+impl ScopeFilesScrollbarGeometry {
+    fn clamped_track_row(&self, row: u16) -> usize {
+        if self.track_area.height == 0 {
+            return 0;
+        }
+        row.saturating_sub(self.track_area.y)
+            .min(self.track_area.height.saturating_sub(1)) as usize
+    }
+
+    fn scroll_for_thumb_top_offset(&self, thumb_top_offset: usize) -> usize {
+        let track_height = self.track_area.height as usize;
+        let thumb_height = self.thumb_area.height.max(1) as usize;
+        let max_thumb_top = track_height.saturating_sub(thumb_height);
+        if max_thumb_top == 0 || self.max_scroll == 0 {
+            return 0;
+        }
+
+        let clamped_offset = thumb_top_offset.min(max_thumb_top);
+        (clamped_offset
+            .saturating_mul(self.max_scroll)
+            .saturating_add(max_thumb_top / 2))
+            / max_thumb_top
+    }
+
+    pub fn scroll_for_track_row_centered(&self, row: u16) -> usize {
+        let thumb_height = self.thumb_area.height.max(1) as usize;
+        let centered_thumb_top = self.clamped_track_row(row).saturating_sub(thumb_height / 2);
+        self.scroll_for_thumb_top_offset(centered_thumb_top)
+    }
+
+    pub fn scroll_for_thumb_top_row(&self, row: u16) -> usize {
+        self.scroll_for_thumb_top_offset(row.saturating_sub(self.track_area.y) as usize)
+    }
+
+    pub fn thumb_grab_offset_for_row(&self, row: u16) -> u16 {
+        if self.thumb_area.height == 0 {
+            return 0;
+        }
+        row.saturating_sub(self.thumb_area.y)
+            .min(self.thumb_area.height.saturating_sub(1))
+    }
 }
 
 #[derive(Debug)]
@@ -609,6 +666,7 @@ pub struct AppState {
     pub category_match_dirs: HashSet<PathBuf>,
     pub scope_files_focus_nodes: HashSet<usize>,
     pub scope_files_drag: Option<FilesDragState>,
+    pub scope_files_scrollbar: Option<ScopeFilesScrollbarGeometry>,
     pub title_startup_fx: Option<Effect>,
     pub title_fx_last_frame: Option<Instant>,
     pub ai_settings: AiSettingsState,

@@ -413,6 +413,34 @@ fn handle_mouse_down(app: &mut AppState, col: u16, row: u16) {
     };
 
     match target {
+        ClickTarget::ScopeFilesScrollbarThumb => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.set_focus(FocusPane::ScopeFiles);
+            if let Some(geometry) = app.scope_files_scrollbar {
+                let grab_offset_rows = geometry.thumb_grab_offset_for_row(row);
+                app.scope_files_drag = Some(FilesDragState {
+                    mode: FilesDragMode::ScrollbarThumb { grab_offset_rows },
+                    start_index: app.tree.cursor,
+                });
+            } else {
+                app.scope_files_drag = None;
+            }
+            app.clear_scope_file_focus_nodes();
+        }
+        ClickTarget::ScopeFilesScrollbarTrack => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.set_focus(FocusPane::ScopeFiles);
+            app.jump_scope_files_scrollbar_to_track_row(row);
+            let grab_offset_rows = app
+                .scope_files_scrollbar
+                .map(|geometry| geometry.thumb_grab_offset_for_row(row))
+                .unwrap_or(0);
+            app.scope_files_drag = Some(FilesDragState {
+                mode: FilesDragMode::ScrollbarThumb { grab_offset_rows },
+                start_index: app.tree.cursor,
+            });
+            app.clear_scope_file_focus_nodes();
+        }
         ClickTarget::ScopeFileCheckbox(index) => {
             app.set_scope_tab(ScopeTab::Files);
             app.set_focus(FocusPane::ScopeFiles);
@@ -472,6 +500,11 @@ fn handle_mouse_drag(app: &mut AppState, col: u16, row: u16) {
 
     let target = app.click_target_at(col, row);
     match (&mut drag.mode, target) {
+        (FilesDragMode::ScrollbarThumb { grab_offset_rows }, _) => {
+            app.set_scope_tab(ScopeTab::Files);
+            app.set_focus(FocusPane::ScopeFiles);
+            app.drag_scope_files_scrollbar_thumb(row, *grab_offset_rows);
+        }
         (
             FilesDragMode::CheckboxSelect {
                 target_selected,
@@ -530,6 +563,7 @@ fn handle_mouse_up(app: &mut AppState, _col: u16, _row: u16) {
                 handle_click_target(app, ClickTarget::ScopeFileRow(drag.start_index));
             }
         }
+        FilesDragMode::ScrollbarThumb { .. } => {}
     }
 }
 
@@ -569,6 +603,7 @@ fn handle_click_target(app: &mut AppState, target: ClickTarget) {
             app.set_focus(FocusPane::ScopeFiles);
             app.toggle_show_selected_categories_only();
         }
+        ClickTarget::ScopeFilesScrollbarThumb | ClickTarget::ScopeFilesScrollbarTrack => {}
         ClickTarget::ScopeCategoryRow(index) => {
             app.set_scope_tab(ScopeTab::Select);
             app.select_cursor = index;
@@ -695,13 +730,10 @@ fn handle_mouse_scroll(app: &mut AppState, col: u16, row: u16, scroll_up: bool) 
 
     match target {
         ClickTarget::StageTab(_) | ClickTarget::ScopeTab(_) => {}
-        ClickTarget::ScopeFileRow(_) => {
-            app.set_scope_tab(ScopeTab::Files);
-            app.normalize_scope_files_cursor();
-            app.tree.cursor = scroll_index(app.tree.cursor, app.scope_files_rows_len(), delta);
-            app.normalize_scope_files_cursor();
-        }
-        ClickTarget::ScopeFileCheckbox(_) => {
+        ClickTarget::ScopeFileRow(_)
+        | ClickTarget::ScopeFileCheckbox(_)
+        | ClickTarget::ScopeFilesScrollbarTrack
+        | ClickTarget::ScopeFilesScrollbarThumb => {
             app.set_scope_tab(ScopeTab::Files);
             app.normalize_scope_files_cursor();
             app.tree.cursor = scroll_index(app.tree.cursor, app.scope_files_rows_len(), delta);
@@ -879,7 +911,55 @@ fn scroll_index(current: usize, len: usize, delta: isize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use ratatui::layout::Rect;
+
     use super::*;
+
+    fn app_with_overflow_files(count: usize) -> AppState {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = AppState::new(cwd);
+        app.stage = Stage::Scope;
+        app.scope_tab = ScopeTab::Files;
+        app.set_focus(FocusPane::ScopeFiles);
+
+        let mut nodes = Vec::with_capacity(count + 1);
+        let child_ids: Vec<usize> = (1..=count).collect();
+        nodes.push(crate::model::FileNode {
+            parent: None,
+            path: PathBuf::from("."),
+            name: ".".to_string(),
+            is_dir: true,
+            children: child_ids.clone(),
+            children_loaded: true,
+            expanded: true,
+            selected: false,
+            unreadable: false,
+        });
+        for idx in 0..count {
+            nodes.push(crate::model::FileNode {
+                parent: Some(0),
+                path: PathBuf::from(format!("./file-{idx}.txt")),
+                name: format!("file-{idx}.txt"),
+                is_dir: false,
+                children: Vec::new(),
+                children_loaded: false,
+                expanded: false,
+                selected: false,
+                unreadable: false,
+            });
+        }
+        app.tree = crate::model::FileTree {
+            nodes,
+            root: 0,
+            cursor: 0,
+            scroll: 0,
+        };
+        app.normalize_scope_files_cursor();
+        app.set_scope_files_scrollbar_geometry(Rect::new(0, 0, 1, 10), count, 10);
+        app
+    }
 
     #[test]
     fn stage_navigation_cycles() {
@@ -909,5 +989,67 @@ mod tests {
         reduce(&mut app, Action::CommitInput);
 
         assert_eq!(app.mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn scrollbar_thumb_drag_updates_files_scroll() {
+        let mut app = app_with_overflow_files(120);
+        let geometry = app.scope_files_scrollbar.expect("scrollbar geometry");
+        app.click_regions
+            .register(geometry.thumb_area, ClickTarget::ScopeFilesScrollbarThumb);
+
+        let start_scroll = app.tree.scroll;
+        reduce(
+            &mut app,
+            Action::MouseDown(geometry.thumb_area.x, geometry.thumb_area.y),
+        );
+        reduce(&mut app, Action::MouseDrag(geometry.thumb_area.x, 9));
+        reduce(&mut app, Action::MouseUp(geometry.thumb_area.x, 9));
+
+        assert!(app.tree.scroll > start_scroll);
+        assert!(app.scope_files_drag.is_none());
+        assert!(app.tree.cursor >= app.tree.scroll);
+    }
+
+    #[test]
+    fn scrollbar_track_click_jumps_without_selection_side_effects() {
+        let mut app = app_with_overflow_files(120);
+        let geometry = app.scope_files_scrollbar.expect("scrollbar geometry");
+        app.click_regions
+            .register(geometry.thumb_area, ClickTarget::ScopeFilesScrollbarThumb);
+        app.click_regions
+            .register(geometry.track_area, ClickTarget::ScopeFilesScrollbarTrack);
+
+        reduce(
+            &mut app,
+            Action::MouseDown(geometry.track_area.x, geometry.track_area.y + 9),
+        );
+        reduce(
+            &mut app,
+            Action::MouseUp(geometry.track_area.x, geometry.track_area.y + 9),
+        );
+
+        assert!(app.tree.scroll > 0);
+        assert!(app.selected_by_tree.is_empty());
+    }
+
+    #[test]
+    fn checkbox_drag_still_selects_multiple_rows() {
+        let mut app = app_with_overflow_files(20);
+        let y0 = 0;
+        let y1 = 1;
+        app.click_regions
+            .register(Rect::new(0, y0, 4, 1), ClickTarget::ScopeFileCheckbox(0));
+        app.click_regions
+            .register(Rect::new(0, y1, 4, 1), ClickTarget::ScopeFileCheckbox(1));
+
+        reduce(&mut app, Action::MouseDown(0, y0));
+        reduce(&mut app, Action::MouseDrag(0, y1));
+        reduce(&mut app, Action::MouseUp(0, y1));
+
+        let first = app.scope_file_node_id_at(0).expect("first row");
+        let second = app.scope_file_node_id_at(1).expect("second row");
+        assert!(app.tree.nodes[first].selected);
+        assert!(app.tree.nodes[second].selected);
     }
 }
