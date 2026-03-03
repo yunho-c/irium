@@ -10,7 +10,7 @@ use ratatui::{
         ScrollbarState, Tabs, Wrap,
     },
 };
-use ratatui_image::{Resize, StatefulImage};
+use ratatui_image::{FilterType, Resize, StatefulImage};
 
 use crate::{
     model::{
@@ -325,7 +325,7 @@ fn draw_scope_preview(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             let draw_area = centered_preview_area(app, inner);
             if let Some(protocol) = app.files_preview_protocol.as_mut() {
                 frame.render_stateful_widget(
-                    StatefulImage::default().resize(Resize::Fit(None)),
+                    StatefulImage::default().resize(Resize::Fit(Some(FilterType::CatmullRom))),
                     draw_area,
                     protocol,
                 );
