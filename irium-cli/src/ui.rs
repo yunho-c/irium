@@ -322,10 +322,11 @@ fn draw_scope_preview(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 
     match app.files_preview_status {
         FilesPreviewStatus::Ready => {
+            let draw_area = centered_preview_area(app, inner);
             if let Some(protocol) = app.files_preview_protocol.as_mut() {
                 frame.render_stateful_widget(
                     StatefulImage::default().resize(Resize::Fit(None)),
-                    inner,
+                    draw_area,
                     protocol,
                 );
                 if let Some(error) = protocol.last_encoding_result().and_then(Result::err) {
@@ -391,6 +392,53 @@ fn draw_scope_preview(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             );
         }
     }
+}
+
+fn centered_preview_area(app: &AppState, area: Rect) -> Rect {
+    let Some(meta) = app.files_preview_source_meta.as_ref() else {
+        return area;
+    };
+    if meta.width == 0 || meta.height == 0 || area.width == 0 || area.height == 0 {
+        return area;
+    }
+
+    let (cell_w, cell_h) = app
+        .files_preview_picker
+        .as_ref()
+        .map(|picker| picker.font_size())
+        .unwrap_or((10, 20));
+    if cell_w == 0 || cell_h == 0 {
+        return area;
+    }
+
+    let source_w = u64::from(meta.width);
+    let source_h = u64::from(meta.height);
+    let avail_w_px = u64::from(area.width) * u64::from(cell_w);
+    let avail_h_px = u64::from(area.height) * u64::from(cell_h);
+    let max_w_px = avail_w_px.min(source_w);
+    let max_h_px = avail_h_px.min(source_h);
+    if max_w_px == 0 || max_h_px == 0 {
+        return area;
+    }
+
+    let scale_w = max_w_px as f64 / source_w as f64;
+    let scale_h = max_h_px as f64 / source_h as f64;
+    let scale = scale_w.min(scale_h);
+
+    let fitted_w_px = ((source_w as f64 * scale).round() as u64).max(1);
+    let fitted_h_px = ((source_h as f64 * scale).round() as u64).max(1);
+
+    let fitted_w = ((fitted_w_px + u64::from(cell_w) - 1) / u64::from(cell_w))
+        .min(u64::from(area.width))
+        .max(1) as u16;
+    let fitted_h = ((fitted_h_px + u64::from(cell_h) - 1) / u64::from(cell_h))
+        .min(u64::from(area.height))
+        .max(1) as u16;
+
+    let offset_x = area.width.saturating_sub(fitted_w) / 2;
+    let offset_y = area.height.saturating_sub(fitted_h) / 2;
+
+    Rect::new(area.x + offset_x, area.y + offset_y, fitted_w, fitted_h)
 }
 
 fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
