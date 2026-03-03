@@ -138,9 +138,10 @@ pub fn reduce(app: &mut AppState, action: Action) {
             }
         }
         Action::ToggleFilesPreview => {
-            if app.stage == Stage::Scope
+            if (app.stage == Stage::Scope
                 && app.scope_tab == ScopeTab::Files
-                && app.focus == FocusPane::ScopeFiles
+                && app.focus == FocusPane::ScopeFiles)
+                || app.stage == Stage::Naming
             {
                 app.toggle_files_preview();
             }

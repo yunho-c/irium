@@ -56,6 +56,7 @@ The app scans the current working directory and opens a three-stage TUI:
 - `r`: refresh AI suggestions (manual regenerate)
 - `m`: open/close Suggestions settings popup
 - `p`: open/close prompt history picker (Naming stage)
+- `v`: toggle file preview pane (focused Naming row)
 - `1` / `2` / `3` in Suggestions pane: set global option index
 - `!` / `@` / `#` in Suggestions pane: alternate global option hotkeys
 - `Left` / `Right` in `Style`: cycle style values

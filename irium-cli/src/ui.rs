@@ -191,7 +191,7 @@ fn draw_scope(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
             .split(split[1]);
         draw_scope_right(frame, app, right[0]);
-        draw_scope_preview(frame, app, right[1]);
+        draw_file_preview_pane(frame, app, right[1]);
     } else {
         draw_scope_right(frame, app, split[1]);
     }
@@ -313,7 +313,7 @@ fn draw_scope_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         .register(layout[1], ClickTarget::ScopePane(FocusPane::ScopeOptions));
 }
 
-fn draw_scope_preview(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
+fn draw_file_preview_pane(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     frame.render_widget(focus_block("Preview", false), area);
     let inner = inner_rect(area);
     if inner.height == 0 || inner.width == 0 {
@@ -377,7 +377,7 @@ fn draw_scope_preview(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         }
         FilesPreviewStatus::Empty => {
             frame.render_widget(
-                Paragraph::new("Move focus in Files to preview images and PDFs.")
+                Paragraph::new("Move focus to a file row to preview images and PDFs.")
                     .style(Theme::muted_text())
                     .wrap(Wrap { trim: true }),
                 inner,
@@ -385,7 +385,7 @@ fn draw_scope_preview(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         }
         FilesPreviewStatus::Hidden => {
             frame.render_widget(
-                Paragraph::new("Press v in Files to toggle preview.")
+                Paragraph::new("Press v to toggle preview.")
                     .style(Theme::muted_text())
                     .wrap(Wrap { trim: true }),
                 inner,
@@ -907,18 +907,29 @@ fn draw_naming(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
     };
 
     draw_naming_table(frame, app, top[0]);
-    draw_naming_right(frame, app, top[1]);
+    let right_area = if app.files_preview_visible {
+        let right_split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+            .split(top[1]);
+        draw_naming_right(frame, app, right_split[0]);
+        draw_file_preview_pane(frame, app, right_split[1]);
+        right_split[0]
+    } else {
+        draw_naming_right(frame, app, top[1]);
+        top[1]
+    };
     draw_command_box(frame, app, chunks[1]);
     app.click_regions
         .register(top[0], ClickTarget::NamingPane(FocusPane::NamingTable));
     app.click_regions
-        .register(top[1], ClickTarget::NamingPane(FocusPane::NamingRight));
+        .register(right_area, ClickTarget::NamingPane(FocusPane::NamingRight));
     app.click_regions
         .register(chunks[1], ClickTarget::NamingPane(FocusPane::NamingCommand));
 }
 
 fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
-    let block = focus_block("Preview", app.focus == FocusPane::NamingTable);
+    let block = focus_block("Rename Preview", app.focus == FocusPane::NamingTable);
     frame.render_widget(block, area);
     let inner = inner_rect(area);
 
@@ -1451,7 +1462,9 @@ fn draw_footer(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
         Stage::Scope => {
             "Scope: arrows/space, left/right expand, ctrl+arrows deep expand, f filter, v preview, t subtab"
         }
-        Stage::Naming => "Naming: r refresh, m settings, p prompt history, / prompt, t subtab",
+        Stage::Naming => {
+            "Naming: r refresh, m settings, p prompt history, / prompt, v preview, t subtab"
+        }
         Stage::Apply => "Apply: Enter submit+exit | Ctrl+Enter submit+stay (simulated)",
     };
     frame.render_widget(Paragraph::new(hints).style(Theme::muted_text()), area);

@@ -153,7 +153,7 @@ impl AppState {
                     "Files: arrows move | Space select | A select-all | p settings | f category-filter | v preview",
                 ),
                 Line::from(
-                    "Naming: r refresh AI | m suggestions settings | p prompt history | 1-3 row option | / prompt",
+                    "Naming: r refresh AI | m suggestions settings | p prompt history | 1-3 row option | / prompt | v preview",
                 ),
                 Line::from("Apply: Enter submit+exit (simulated) | Ctrl+Enter submit+stay"),
             ],
@@ -771,55 +771,86 @@ impl AppState {
             return;
         }
 
-        if self.stage != Stage::Scope || self.scope_tab != ScopeTab::Files {
-            self.files_preview_status = FilesPreviewStatus::Empty;
-            self.files_preview_target = None;
-            self.files_preview_error = None;
-            self.files_preview_source_meta = None;
-            self.files_preview_protocol = None;
-            self.files_preview_active_request_id = None;
+        if self.stage == Stage::Scope && self.scope_tab == ScopeTab::Files {
+            let Some(node_id) = self.current_scope_file_node_id() else {
+                self.files_preview_status = FilesPreviewStatus::Empty;
+                self.files_preview_target = None;
+                self.files_preview_error = None;
+                self.files_preview_source_meta = None;
+                self.files_preview_protocol = None;
+                self.files_preview_active_request_id = None;
+                return;
+            };
+
+            if self.tree.nodes[node_id].is_dir {
+                self.files_preview_status = FilesPreviewStatus::Unsupported;
+                self.files_preview_target = Some(self.tree.nodes[node_id].path.clone());
+                self.files_preview_error = Some("Folder preview is not supported".to_string());
+                self.files_preview_source_meta = Some(preview::PreviewSourceMeta {
+                    kind: PreviewKind::Unsupported,
+                    width: 0,
+                    height: 0,
+                    pdf_page: None,
+                });
+                self.files_preview_protocol = None;
+                self.files_preview_active_request_id = None;
+                return;
+            }
+
+            let path = self.tree.nodes[node_id].path.clone();
+            if self.files_preview_target.as_ref() == Some(&path)
+                && matches!(
+                    self.files_preview_status,
+                    FilesPreviewStatus::Loading
+                        | FilesPreviewStatus::Ready
+                        | FilesPreviewStatus::Unsupported
+                        | FilesPreviewStatus::Error
+                )
+            {
+                return;
+            }
+
+            self.request_files_preview_for_path(path);
             return;
         }
 
-        let Some(node_id) = self.current_scope_file_node_id() else {
-            self.files_preview_status = FilesPreviewStatus::Empty;
-            self.files_preview_target = None;
-            self.files_preview_error = None;
-            self.files_preview_source_meta = None;
-            self.files_preview_protocol = None;
-            self.files_preview_active_request_id = None;
-            return;
-        };
-
-        if self.tree.nodes[node_id].is_dir {
-            self.files_preview_status = FilesPreviewStatus::Unsupported;
-            self.files_preview_target = Some(self.tree.nodes[node_id].path.clone());
-            self.files_preview_error = Some("Folder preview is not supported".to_string());
-            self.files_preview_source_meta = Some(preview::PreviewSourceMeta {
-                kind: PreviewKind::Unsupported,
-                width: 0,
-                height: 0,
-                pdf_page: None,
-            });
-            self.files_preview_protocol = None;
-            self.files_preview_active_request_id = None;
+        if self.stage == Stage::Naming {
+            let Some(row) = self.rename_rows.get(
+                self.rename_cursor
+                    .min(self.rename_rows.len().saturating_sub(1)),
+            ) else {
+                self.files_preview_status = FilesPreviewStatus::Empty;
+                self.files_preview_target = None;
+                self.files_preview_error = None;
+                self.files_preview_source_meta = None;
+                self.files_preview_protocol = None;
+                self.files_preview_active_request_id = None;
+                return;
+            };
+            let path = row.path.clone();
+            if self.files_preview_target.as_ref() == Some(&path)
+                && matches!(
+                    self.files_preview_status,
+                    FilesPreviewStatus::Loading
+                        | FilesPreviewStatus::Ready
+                        | FilesPreviewStatus::Unsupported
+                        | FilesPreviewStatus::Error
+                )
+            {
+                return;
+            }
+            self.request_files_preview_for_path(path);
             return;
         }
 
-        let path = self.tree.nodes[node_id].path.clone();
-        if self.files_preview_target.as_ref() == Some(&path)
-            && matches!(
-                self.files_preview_status,
-                FilesPreviewStatus::Loading
-                    | FilesPreviewStatus::Ready
-                    | FilesPreviewStatus::Unsupported
-                    | FilesPreviewStatus::Error
-            )
         {
-            return;
+            self.files_preview_status = FilesPreviewStatus::Empty;
+            self.files_preview_target = None;
+            self.files_preview_error = None;
+            self.files_preview_source_meta = None;
+            self.files_preview_protocol = None;
+            self.files_preview_active_request_id = None;
         }
-
-        self.request_files_preview_for_path(path);
     }
 
     fn request_files_preview_for_path(&mut self, path: PathBuf) {

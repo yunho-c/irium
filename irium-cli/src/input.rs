@@ -282,9 +282,10 @@ fn map_normal_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
         .modifiers
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
         && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
-        && app.stage == Stage::Scope
-        && app.scope_tab == ScopeTab::Files
-        && app.focus == FocusPane::ScopeFiles
+        && ((app.stage == Stage::Scope
+            && app.scope_tab == ScopeTab::Files
+            && app.focus == FocusPane::ScopeFiles)
+            || app.stage == Stage::Naming)
     {
         return vec![Action::ToggleFilesPreview];
     }
@@ -464,6 +465,18 @@ mod tests {
         app.set_stage(Stage::Scope);
         app.set_scope_tab(ScopeTab::Files);
         app.set_focus(FocusPane::ScopeFiles);
+
+        let event = Event::Key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
+        let actions = map_event(&app, event);
+        assert!(matches!(actions.as_slice(), [Action::ToggleFilesPreview]));
+    }
+
+    #[test]
+    fn v_maps_to_toggle_files_preview_in_naming_stage() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = crate::model::AppState::new(cwd);
+        app.set_stage(Stage::Naming);
+        app.set_focus(FocusPane::NamingTable);
 
         let event = Event::Key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
         let actions = map_event(&app, event);
