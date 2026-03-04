@@ -15,7 +15,8 @@ use ratatui_image::{FilterType, Resize, StatefulImage};
 use crate::{
     model::{
         AiSettingsField, AppState, Capitalization, ClickTarget, FilesPreviewStatus, FocusPane,
-        InputMode, NameLength, NamingAiStatus, NamingTab, ScopeTab, Separator, Stage, ToastLevel,
+        InputMode, NameLength, NamingAiStatus, NamingTab, RenameRow, ScopeTab, Separator, Stage,
+        ToastLevel,
     },
     theme::Theme,
 };
@@ -983,6 +984,12 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             if row_option_index == 1 { "*" } else { "" },
             if row_option_index == 2 { "*" } else { "" }
         );
+        let show_placeholder = should_show_pending_proposed_name(app, row);
+        let proposed_part = if show_placeholder {
+            "...".to_string()
+        } else {
+            format!("{}{}{}", row.proposed_name, option_suffix, conflict)
+        };
         let style = if idx == app.rename_cursor {
             Theme::selected_row()
         } else {
@@ -998,10 +1005,7 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         let line = Line::from(vec![
             Span::styled(format!("{mark} G{} ", row.group_id), style),
             Span::styled(row.current_name.clone(), current_name_style),
-            Span::styled(
-                format!(" -> {}{}{}", row.proposed_name, option_suffix, conflict),
-                style,
-            ),
+            Span::styled(format!(" -> {proposed_part}"), style),
         ]);
         items.push(ListItem::new(line));
 
@@ -1211,6 +1215,22 @@ fn analysis_cycle_color(ticks: u64, row_index: usize) -> Color {
     let sat = 0.82 - (pulse * 0.10);
     let light = 0.62 + (pulse * 0.10);
     hsl_to_rgb(hue, sat, light)
+}
+
+fn should_show_pending_proposed_name(app: &AppState, row: &RenameRow) -> bool {
+    let has_override = row
+        .override_name
+        .as_ref()
+        .map(|name| !name.trim().is_empty())
+        .unwrap_or(false);
+    if has_override {
+        return false;
+    }
+
+    app.suggestion_set
+        .as_ref()
+        .map(|set| !set.per_path_options.contains_key(&row.path))
+        .unwrap_or(true)
 }
 
 fn hsl_to_rgb(hue_deg: f32, sat: f32, light: f32) -> Color {
