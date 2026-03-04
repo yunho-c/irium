@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
         Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
@@ -983,16 +983,27 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             if row_option_index == 1 { "*" } else { "" },
             if row_option_index == 2 { "*" } else { "" }
         );
-        let line = format!(
-            "{mark} G{} {} -> {}{}{}",
-            row.group_id, row.current_name, row.proposed_name, option_suffix, conflict
-        );
         let style = if idx == app.rename_cursor {
             Theme::selected_row()
         } else {
             Theme::panel()
         };
-        items.push(ListItem::new(line).style(style));
+        let is_analyzing_this_row = app.naming_ai_status == NamingAiStatus::AnalyzingFiles
+            && app.ai_analyzing_paths.contains(&row.path);
+        let current_name_style = if is_analyzing_this_row {
+            style.fg(analysis_cycle_color(app.ticks, idx))
+        } else {
+            style
+        };
+        let line = Line::from(vec![
+            Span::styled(format!("{mark} G{} ", row.group_id), style),
+            Span::styled(row.current_name.clone(), current_name_style),
+            Span::styled(
+                format!(" -> {}{}{}", row.proposed_name, option_suffix, conflict),
+                style,
+            ),
+        ]);
+        items.push(ListItem::new(line));
 
         let y = inner.y + (idx - app.rename_scroll) as u16;
         app.click_regions.register(
@@ -1190,6 +1201,47 @@ fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         }
     }
     frame.render_widget(List::new(style_items), style_inner);
+}
+
+fn analysis_cycle_color(ticks: u64, row_index: usize) -> Color {
+    let t = (ticks as f32 * 0.08) + (row_index as f32 * 0.35);
+    let pulse = (t.sin() + 1.0) * 0.5;
+    // Light blue/cyan sweep for in-progress analysis rows.
+    let hue = 188.0 + (pulse * 18.0);
+    let sat = 0.82 - (pulse * 0.10);
+    let light = 0.62 + (pulse * 0.10);
+    hsl_to_rgb(hue, sat, light)
+}
+
+fn hsl_to_rgb(hue_deg: f32, sat: f32, light: f32) -> Color {
+    let hue = hue_deg.rem_euclid(360.0);
+    let sat = sat.clamp(0.0, 1.0);
+    let light = light.clamp(0.0, 1.0);
+
+    let c = (1.0 - (2.0 * light - 1.0).abs()) * sat;
+    let h_prime = hue / 60.0;
+    let x = c * (1.0 - ((h_prime % 2.0) - 1.0).abs());
+
+    let (r1, g1, b1) = if h_prime < 1.0 {
+        (c, x, 0.0)
+    } else if h_prime < 2.0 {
+        (x, c, 0.0)
+    } else if h_prime < 3.0 {
+        (0.0, c, x)
+    } else if h_prime < 4.0 {
+        (0.0, x, c)
+    } else if h_prime < 5.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+    let m = light - c / 2.0;
+
+    Color::Rgb(
+        ((r1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+        ((g1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+        ((b1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+    )
 }
 
 fn draw_naming_ai_settings_popup(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {

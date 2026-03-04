@@ -15,13 +15,24 @@ use crate::ai::{
 const EXTRACT_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_CONCURRENT_EXTRACTS: usize = 4;
 
+#[derive(Debug, Clone)]
+pub enum AnalyzeProgressEvent {
+    FileStarted(PathBuf),
+    FileFinished(PathBuf),
+}
+
+pub type AnalyzeProgressCallback = Arc<dyn Fn(AnalyzeProgressEvent) + Send + Sync>;
+
 #[derive(Debug)]
 struct SingleAnalyzeResult {
     context: AnalyzedFileContext,
     warning: Option<String>,
 }
 
-pub async fn analyze_files(paths: Vec<PathBuf>) -> AnalyzeOutput {
+pub async fn analyze_files(
+    paths: Vec<PathBuf>,
+    progress: Option<AnalyzeProgressCallback>,
+) -> AnalyzeOutput {
     let original_len = paths.len();
     let limited: Vec<PathBuf> = paths.into_iter().take(MAX_FILES_PER_RUN).collect();
     let skipped_count = original_len.saturating_sub(limited.len());
@@ -39,9 +50,17 @@ pub async fn analyze_files(paths: Vec<PathBuf>) -> AnalyzeOutput {
     let mut set = JoinSet::new();
     for path in limited {
         let semaphore = semaphore.clone();
+        let progress = progress.clone();
         set.spawn(async move {
             let _permit = semaphore.acquire_owned().await.ok();
-            analyze_one(path).await
+            if let Some(callback) = &progress {
+                callback(AnalyzeProgressEvent::FileStarted(path.clone()));
+            }
+            let result = analyze_one(path.clone()).await;
+            if let Some(callback) = &progress {
+                callback(AnalyzeProgressEvent::FileFinished(path));
+            }
+            result
         });
     }
 

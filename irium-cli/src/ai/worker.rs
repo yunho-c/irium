@@ -1,11 +1,14 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
+    sync::Arc,
     sync::mpsc::{self, Receiver, Sender},
 };
 
 use crate::ai::{
-    ModelListItem, analyze::analyze_files, models::discover_models,
+    ModelListItem,
+    analyze::{AnalyzeProgressEvent, analyze_files},
+    models::discover_models,
     suggest::generate_filename_suggestions,
 };
 
@@ -48,6 +51,14 @@ pub enum AiWorkerEvent {
         per_path_options: HashMap<PathBuf, [String; 3]>,
         warnings: Vec<String>,
         skipped_files: usize,
+    },
+    AnalysisFileStarted {
+        request_id: u64,
+        path: PathBuf,
+    },
+    AnalysisFileFinished {
+        request_id: u64,
+        path: PathBuf,
     },
     AiError {
         request_id: u64,
@@ -116,7 +127,18 @@ fn worker_loop(cmd_rx: Receiver<AiWorkerCommand>, evt_tx: Sender<AiWorkerEvent>)
                     request_id,
                     stage: WorkerProgressStage::AnalyzingFiles,
                 });
-                let analyzed = runtime.block_on(analyze_files(paths));
+                let progress_tx = evt_tx.clone();
+                let progress_callback = Arc::new(move |event: AnalyzeProgressEvent| match event {
+                    AnalyzeProgressEvent::FileStarted(path) => {
+                        let _ = progress_tx
+                            .send(AiWorkerEvent::AnalysisFileStarted { request_id, path });
+                    }
+                    AnalyzeProgressEvent::FileFinished(path) => {
+                        let _ = progress_tx
+                            .send(AiWorkerEvent::AnalysisFileFinished { request_id, path });
+                    }
+                });
+                let analyzed = runtime.block_on(analyze_files(paths, Some(progress_callback)));
                 let mut warnings = analyzed.warnings;
                 for file in &analyzed.files {
                     warnings.extend(file.warnings.clone());

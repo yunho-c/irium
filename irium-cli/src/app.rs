@@ -175,6 +175,7 @@ impl AppState {
             ai_settings,
             naming_ai_status: NamingAiStatus::Idle,
             naming_ai_error: None,
+            ai_analyzing_paths: HashSet::new(),
             ai_next_request_id: 1,
             ai_active_request_id: None,
             ai_worker_tx,
@@ -1829,6 +1830,7 @@ impl AppState {
         self.ai_active_request_id = Some(request_id);
         self.naming_ai_status = NamingAiStatus::DiscoveringModels;
         self.naming_ai_error = None;
+        self.ai_analyzing_paths.clear();
         if let Some(tx) = &self.ai_worker_tx {
             let _ = tx.send(AiWorkerCommand::DiscoverModels {
                 request_id,
@@ -1846,6 +1848,7 @@ impl AppState {
         } else {
             self.naming_ai_status = NamingAiStatus::NeedsConfig;
             self.naming_ai_error = None;
+            self.ai_analyzing_paths.clear();
         }
     }
 
@@ -1856,6 +1859,7 @@ impl AppState {
     pub fn trigger_naming_suggestions_refresh_with_prompt(&mut self, user_prompt: Option<String>) {
         if !self.ai_settings_has_minimum_config() {
             self.naming_ai_status = NamingAiStatus::NeedsConfig;
+            self.ai_analyzing_paths.clear();
             self.push_toast(
                 ToastLevel::Warning,
                 "Open Suggestions settings (m) and configure OpenRouter key + model",
@@ -1864,15 +1868,18 @@ impl AppState {
         }
         if self.rename_rows.is_empty() {
             self.naming_ai_status = NamingAiStatus::Idle;
+            self.ai_analyzing_paths.clear();
             return;
         }
 
         let Some(api_key) = self.ai_settings.api_key.clone() else {
             self.naming_ai_status = NamingAiStatus::NeedsConfig;
+            self.ai_analyzing_paths.clear();
             return;
         };
         let Some(model_id) = self.ai_settings.selected_model.clone() else {
             self.naming_ai_status = NamingAiStatus::NeedsConfig;
+            self.ai_analyzing_paths.clear();
             return;
         };
 
@@ -1880,6 +1887,7 @@ impl AppState {
         self.ai_active_request_id = Some(request_id);
         self.naming_ai_error = None;
         self.naming_ai_status = NamingAiStatus::AnalyzingFiles;
+        self.ai_analyzing_paths.clear();
 
         let paths = self
             .rename_rows
@@ -1897,6 +1905,7 @@ impl AppState {
         } else {
             self.naming_ai_status = NamingAiStatus::Error;
             self.naming_ai_error = Some("AI worker is not available".to_string());
+            self.ai_analyzing_paths.clear();
         }
     }
 
@@ -1912,6 +1921,7 @@ impl AppState {
                 Err(TryRecvError::Disconnected) => {
                     self.naming_ai_status = NamingAiStatus::Error;
                     self.naming_ai_error = Some("AI worker disconnected".to_string());
+                    self.ai_analyzing_paths.clear();
                     break;
                 }
             }
@@ -2042,6 +2052,21 @@ impl AppState {
                     WorkerProgressStage::AnalyzingFiles => NamingAiStatus::AnalyzingFiles,
                     WorkerProgressStage::Generating => NamingAiStatus::Generating,
                 };
+                if stage != WorkerProgressStage::AnalyzingFiles {
+                    self.ai_analyzing_paths.clear();
+                }
+            }
+            AiWorkerEvent::AnalysisFileStarted { request_id, path } => {
+                if Some(request_id) != self.ai_active_request_id {
+                    return;
+                }
+                self.ai_analyzing_paths.insert(path);
+            }
+            AiWorkerEvent::AnalysisFileFinished { request_id, path } => {
+                if Some(request_id) != self.ai_active_request_id {
+                    return;
+                }
+                self.ai_analyzing_paths.remove(&path);
             }
             AiWorkerEvent::ModelsDiscovered { request_id, models } => {
                 if Some(request_id) != self.ai_active_request_id {
@@ -2052,6 +2077,7 @@ impl AppState {
                 self.ai_settings.discovery_error = None;
                 self.naming_ai_status = NamingAiStatus::Ready;
                 self.naming_ai_error = None;
+                self.ai_analyzing_paths.clear();
                 if self.ai_settings.selected_model.is_none()
                     && let Some(first) = self.ai_settings.discovered_models.first()
                 {
@@ -2085,6 +2111,7 @@ impl AppState {
                 self.suggestion_set = Some(set);
                 self.naming_ai_status = NamingAiStatus::Ready;
                 self.naming_ai_error = None;
+                self.ai_analyzing_paths.clear();
                 self.recompute_proposals();
                 if skipped_files > 0 {
                     self.push_toast(
@@ -2120,6 +2147,7 @@ impl AppState {
                 }
                 self.naming_ai_status = NamingAiStatus::Error;
                 self.naming_ai_error = Some(message.clone());
+                self.ai_analyzing_paths.clear();
                 self.push_toast(ToastLevel::Error, message);
             }
         }

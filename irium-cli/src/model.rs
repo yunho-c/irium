@@ -697,6 +697,7 @@ pub struct AppState {
     pub ai_settings: AiSettingsState,
     pub naming_ai_status: NamingAiStatus,
     pub naming_ai_error: Option<String>,
+    pub ai_analyzing_paths: HashSet<PathBuf>,
     pub ai_next_request_id: u64,
     pub ai_active_request_id: Option<u64>,
     pub ai_worker_tx: Option<Sender<AiWorkerCommand>>,
