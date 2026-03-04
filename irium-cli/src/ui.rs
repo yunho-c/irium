@@ -1002,10 +1002,26 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         } else {
             style
         };
+        let show_processing_star = show_placeholder
+            && matches!(
+                app.naming_ai_status,
+                NamingAiStatus::AnalyzingFiles | NamingAiStatus::Generating
+            );
+        let transition_span = if show_processing_star {
+            Span::styled(
+                format!(" {} ", pending_twinkle_star(app.ticks, idx)),
+                style
+                    .fg(analysis_cycle_color(app.ticks, idx))
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(" -> ", style)
+        };
         let line = Line::from(vec![
             Span::styled(format!("{mark} G{} ", row.group_id), style),
             Span::styled(row.current_name.clone(), current_name_style),
-            Span::styled(format!(" -> {proposed_part}"), style),
+            transition_span,
+            Span::styled(proposed_part, style),
         ]);
         items.push(ListItem::new(line));
 
@@ -1208,13 +1224,21 @@ fn draw_naming_right(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
 }
 
 fn analysis_cycle_color(ticks: u64, row_index: usize) -> Color {
-    let t = (ticks as f32 * 0.08) + (row_index as f32 * 0.35);
+    // Faster color cycle for active processing rows.
+    let t = (ticks as f32 * 0.22) + (row_index as f32 * 0.35);
     let pulse = (t.sin() + 1.0) * 0.5;
     // Light blue/cyan sweep for in-progress analysis rows.
     let hue = 188.0 + (pulse * 18.0);
     let sat = 0.82 - (pulse * 0.10);
     let light = 0.62 + (pulse * 0.10);
     hsl_to_rgb(hue, sat, light)
+}
+
+fn pending_twinkle_star(ticks: u64, row_index: usize) -> char {
+    let twinkle_star = ['✦', '✧'];
+    // Slower glyph sweep than color cycling.
+    let phase = ((ticks / 12) + row_index as u64) % (twinkle_star.len() as u64);
+    twinkle_star[phase as usize]
 }
 
 fn should_show_pending_proposed_name(app: &AppState, row: &RenameRow) -> bool {
