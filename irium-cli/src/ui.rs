@@ -684,8 +684,19 @@ fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect, focu
             .iter()
             .all(|ext| app.selected_extensions.contains(ext));
         let extensions = category.extensions.join(",");
+        let category_name = fit_to_width(&category.name, left_width);
+        let category_span = if app.show_selected_categories_only && is_active {
+            Span::styled(
+                category_name,
+                Style::default()
+                    .fg(Theme::success())
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::raw(category_name)
+        };
         let line = Line::from(vec![
-            Span::raw(fit_to_width(&category.name, left_width)),
+            category_span,
             Span::raw("  "),
             Span::styled(
                 fit_to_width(&extensions, right_width),

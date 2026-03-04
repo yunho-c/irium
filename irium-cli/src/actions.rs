@@ -131,8 +131,7 @@ pub fn reduce(app: &mut AppState, action: Action) {
         }
         Action::ToggleShowSelectedCategoriesOnly => {
             if app.stage == Stage::Scope
-                && app.scope_tab == ScopeTab::Files
-                && app.focus == FocusPane::ScopeFiles
+                && matches!(app.focus, FocusPane::ScopeFiles | FocusPane::ScopeCategory)
             {
                 app.toggle_show_selected_categories_only();
             }
