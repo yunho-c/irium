@@ -651,10 +651,7 @@ fn append_name_with_colored_extension(
         } else {
             Theme::muted_text()
         };
-        line.push(Span::styled(
-            ext.to_string(),
-            ext_style,
-        ));
+        line.push(Span::styled(ext.to_string(), ext_style));
         return;
     }
 
@@ -698,9 +695,17 @@ fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect, focu
             .all(|ext| app.selected_extensions.contains(ext));
         let extensions = category.extensions.join(",");
         let category_name = fit_to_width(&category.name, left_width);
+        let category_name_span = if is_active {
+            Span::styled(
+                category_name,
+                Style::default().add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::raw(category_name)
+        };
         let extension_style = category_extensions_style(&category.extensions, is_active);
         let line = Line::from(vec![
-            Span::raw(category_name),
+            category_name_span,
             Span::raw("  "),
             Span::styled(fit_to_width(&extensions, right_width), extension_style),
         ]);
@@ -1023,11 +1028,6 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             if row_option_index == 2 { "*" } else { "" }
         );
         let show_placeholder = should_show_pending_proposed_name(app, row);
-        let proposed_part = if show_placeholder {
-            "...".to_string()
-        } else {
-            format!("{}{}{}", row.proposed_name, option_suffix, conflict)
-        };
         let style = if idx == app.rename_cursor {
             Theme::selected_row()
         } else {
@@ -1035,31 +1035,54 @@ fn draw_naming_table(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
         };
         let is_analyzing_this_row = app.naming_ai_status == NamingAiStatus::AnalyzingFiles
             && app.ai_analyzing_paths.contains(&row.path);
-        let current_name_style = if is_analyzing_this_row {
-            style.fg(analysis_cycle_color(app.ticks, idx))
-        } else {
-            style
-        };
         let show_processing_star = show_placeholder
             && matches!(
                 app.naming_ai_status,
                 NamingAiStatus::AnalyzingFiles | NamingAiStatus::Generating
             );
+        let transition_token = if show_processing_star {
+            format!(" {} ", pending_twinkle_star(app.ticks, idx))
+        } else {
+            " -> ".to_string()
+        };
         let transition_span = if show_processing_star {
             Span::styled(
-                format!(" {} ", pending_twinkle_star(app.ticks, idx)),
+                transition_token.clone(),
                 style
                     .fg(analysis_cycle_color(app.ticks, idx))
                     .add_modifier(Modifier::BOLD),
             )
         } else {
-            Span::styled(" -> ", style)
+            Span::styled(transition_token.clone(), style)
+        };
+
+        let total_width = inner.width as usize;
+        let center_width = transition_token.chars().count();
+        let side_width = total_width.saturating_sub(center_width);
+        let left_width = side_width / 2;
+        let right_width = side_width.saturating_sub(left_width);
+
+        let left_text = fit_to_width(
+            &format!("{mark} G{} {}", row.group_id, row.current_name),
+            left_width,
+        );
+        let right_text = format_naming_right_column(
+            &row.proposed_name,
+            &option_suffix,
+            conflict,
+            show_placeholder,
+            right_width,
+        );
+
+        let left_span_style = if is_analyzing_this_row {
+            style.fg(analysis_cycle_color(app.ticks, idx))
+        } else {
+            style
         };
         let line = Line::from(vec![
-            Span::styled(format!("{mark} G{} ", row.group_id), style),
-            Span::styled(row.current_name.clone(), current_name_style),
+            Span::styled(left_text, left_span_style),
             transition_span,
-            Span::styled(proposed_part, style),
+            Span::styled(right_text, style),
         ]);
         items.push(ListItem::new(line));
 
@@ -1293,6 +1316,28 @@ fn should_show_pending_proposed_name(app: &AppState, row: &RenameRow) -> bool {
         .as_ref()
         .map(|set| !set.per_path_options.contains_key(&row.path))
         .unwrap_or(true)
+}
+
+fn format_naming_right_column(
+    proposed_name: &str,
+    option_suffix: &str,
+    conflict_suffix: &str,
+    show_placeholder: bool,
+    width: usize,
+) -> String {
+    if show_placeholder {
+        return fit_to_width("...", width);
+    }
+
+    let tail = format!("{option_suffix}{conflict_suffix}");
+    let tail_len = tail.chars().count();
+    if width <= tail_len {
+        return fit_to_width(&tail, width);
+    }
+
+    let base_width = width - tail_len;
+    let base = fit_to_width(proposed_name, base_width);
+    format!("{base}{tail}")
 }
 
 fn hsl_to_rgb(hue_deg: f32, sat: f32, light: f32) -> Color {
