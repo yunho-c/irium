@@ -533,7 +533,7 @@ fn draw_scope_files(frame: &mut Frame<'_>, app: &mut AppState, area: Rect) {
             },
             Span::raw(" "),
         ];
-        append_name_with_muted_extension(&mut line, node);
+        append_name_with_colored_extension(&mut line, node, &app.selected_extensions);
         if node.unreadable {
             line.push(Span::raw(" !"));
         }
@@ -630,7 +630,11 @@ fn draw_files_settings_popup(frame: &mut Frame<'_>, app: &mut AppState, area: Re
     );
 }
 
-fn append_name_with_muted_extension(line: &mut Vec<Span<'_>>, node: &crate::model::FileNode) {
+fn append_name_with_colored_extension(
+    line: &mut Vec<Span<'_>>,
+    node: &crate::model::FileNode,
+    selected_extensions: &std::collections::HashSet<String>,
+) {
     if node.is_dir {
         line.push(Span::raw(node.name.clone()));
         return;
@@ -641,7 +645,16 @@ fn append_name_with_muted_extension(line: &mut Vec<Span<'_>>, node: &crate::mode
     {
         let (base, ext) = node.name.split_at(dot_pos);
         line.push(Span::raw(base.to_string()));
-        line.push(Span::styled(ext.to_string(), Theme::muted_text()));
+        let ext_no_dot = ext.trim_start_matches('.').to_ascii_lowercase();
+        let ext_style = if selected_extensions.contains(&ext_no_dot) {
+            Style::default().fg(extension_category_color(&ext_no_dot))
+        } else {
+            Theme::muted_text()
+        };
+        line.push(Span::styled(
+            ext.to_string(),
+            ext_style,
+        ));
         return;
     }
 
@@ -685,27 +698,11 @@ fn draw_scope_select(frame: &mut Frame<'_>, app: &mut AppState, area: Rect, focu
             .all(|ext| app.selected_extensions.contains(ext));
         let extensions = category.extensions.join(",");
         let category_name = fit_to_width(&category.name, left_width);
-        let category_span = if app.show_selected_categories_only && is_active {
-            Span::styled(
-                category_name,
-                Style::default()
-                    .fg(Theme::success())
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::raw(category_name)
-        };
+        let extension_style = category_extensions_style(&category.extensions, is_active);
         let line = Line::from(vec![
-            category_span,
+            Span::raw(category_name),
             Span::raw("  "),
-            Span::styled(
-                fit_to_width(&extensions, right_width),
-                if is_active {
-                    Theme::accent_text()
-                } else {
-                    Theme::muted_text()
-                },
-            ),
+            Span::styled(fit_to_width(&extensions, right_width), extension_style),
         ]);
         let style = if idx == app.select_cursor {
             Theme::selected_row()
@@ -743,6 +740,36 @@ fn fit_to_width(text: &str, width: usize) -> String {
     let mut out = text.chars().take(width - 1).collect::<String>();
     out.push('…');
     out
+}
+
+fn category_extensions_style(extensions: &[String], is_active: bool) -> Style {
+    if !is_active {
+        return Theme::muted_text();
+    }
+    let color = extensions
+        .first()
+        .map(|ext| extension_category_color(ext))
+        .unwrap_or_else(Theme::muted);
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
+fn extension_category_color(ext: &str) -> Color {
+    match ext.to_ascii_lowercase().as_str() {
+        // PDF: light red
+        "pdf" => Color::Rgb(255, 170, 170),
+        // Images: light purple
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tif" | "tiff" | "heic" | "heif"
+        | "svg" => Color::Rgb(206, 174, 255),
+        // Archives: brown
+        "zip" | "tar" | "gz" | "rar" | "7z" | "bz2" | "xz" => Color::Rgb(181, 131, 90),
+        // Audio: yellow
+        "mp3" | "wav" | "m4a" | "flac" | "aac" | "ogg" | "opus" => Color::Rgb(247, 221, 121),
+        // Presentations: orange
+        "ppt" | "pptx" | "key" => Color::Rgb(255, 184, 118),
+        // Docs: light blue
+        "doc" | "docx" | "txt" | "md" | "rtf" | "odt" => Color::Rgb(163, 220, 255),
+        _ => Theme::muted(),
+    }
 }
 
 fn node_icon(node: &crate::model::FileNode) -> &'static str {
