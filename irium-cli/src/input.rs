@@ -385,6 +385,14 @@ fn map_normal_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
 
 fn map_ctrl_keys(app: &AppState, key: KeyEvent) -> Vec<Action> {
     match key.code {
+        KeyCode::Tab => {
+            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                vec![Action::PrevStage]
+            } else {
+                vec![Action::NextStage]
+            }
+        }
+        KeyCode::BackTab => vec![Action::PrevStage],
         KeyCode::Right => vec![Action::ExpandAll],
         KeyCode::Left => vec![Action::CollapseAll],
         KeyCode::Enter => vec![Action::Submit { stay: true }],
@@ -512,5 +520,30 @@ mod tests {
             actions.as_slice(),
             [Action::ToggleShowSelectedCategoriesOnly]
         ));
+    }
+
+    #[test]
+    fn ctrl_tab_maps_to_next_stage() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = crate::model::AppState::new(cwd);
+        app.set_stage(Stage::Scope);
+
+        let event = Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::CONTROL));
+        let actions = map_event(&app, event);
+        assert!(matches!(actions.as_slice(), [Action::NextStage]));
+    }
+
+    #[test]
+    fn ctrl_shift_tab_maps_to_prev_stage() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut app = crate::model::AppState::new(cwd);
+        app.set_stage(Stage::Naming);
+
+        let event = Event::Key(KeyEvent::new(
+            KeyCode::BackTab,
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ));
+        let actions = map_event(&app, event);
+        assert!(matches!(actions.as_slice(), [Action::PrevStage]));
     }
 }
